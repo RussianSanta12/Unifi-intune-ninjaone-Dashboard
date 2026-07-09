@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stats Dashboard</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="dashboard">
+    <header class="dashboard-header">
+      <img src="logo/logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
+      <h1>Stats Dashboard</h1>
+      <span id="last-updated" class="last-updated">Loading…</span>
+    </header>
+
+    <section class="panel panel-unifi" id="panel-unifi">
+      <div class="row">
+        <div class="card unifi-connected-now">
+          <span class="stat-value" id="unifi-connected-now">–</span>
+          <span class="stat-label" id="unifi-connected-now-label">Connected Now</span>
+        </div>
+        <div class="unifi-months" id="unifi-months">
+          <!-- three month blocks injected here -->
+        </div>
+      </div>
+      <div class="panel-footer" id="unifi-status"></div>
+    </section>
+
+    <main class="row row-fixed">
+      <section class="panel panel-square" id="panel-ninjaone">
+        <h2>NinjaOne</h2>
+        <div class="row">
+          <div class="card">
+            <span class="stat-value" id="ninjaone-offline">–</span>
+            <span class="stat-label">Offline Devices</span>
+          </div>
+          <div class="card">
+            <span class="stat-value" id="ninjaone-alerts">–</span>
+            <span class="stat-label">Open Alerts</span>
+          </div>
+        </div>
+        <div class="panel-footer" id="ninjaone-status"></div>
+      </section>
+
+      <section class="panel panel-square" id="panel-intune">
+        <h2>Intune</h2>
+        <div class="row">
+          <div class="card">
+            <span class="stat-value" id="intune-noncompliant">–</span>
+            <span class="stat-label">Non-Compliant Devices</span>
+          </div>
+          <div class="card">
+            <span class="stat-value" id="intune-total">–</span>
+            <span class="stat-label">Total Managed Devices</span>
+          </div>
+        </div>
+        <div class="panel-footer" id="intune-status"></div>
+      </section>
+    </main>
+
+    <section class="row row-grow">
+      <div class="panel panel-issues" id="panel-ninjaone-issues">
+        <h3>NinjaOne — Pressing Issues</h3>
+        <ul class="issue-list" id="ninjaone-issues"></ul>
+      </div>
+      <div class="panel panel-issues" id="panel-intune-issues">
+        <h3>Intune — Pressing Issues</h3>
+        <ul class="issue-list" id="intune-issues"></ul>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

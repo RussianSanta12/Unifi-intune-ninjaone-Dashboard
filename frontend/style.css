@@ -1,0 +1,188 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  background: #0f1117;
+  color: #e6e8ee;
+  font-family: 'Segoe UI', Roboto, Arial, sans-serif;
+  overflow: hidden;
+}
+
+/* 16:9 fill  */
+.dashboard {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: 16 / 9;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 2vh 2vw;
+  gap: 1.5vh;
+}
+
+.dashboard-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5vw;
+  padding-bottom: 1.5vh;
+  border-bottom: 1px solid #262a35;
+}
+
+.dashboard-header .logo {
+  height: 5vh;
+  max-width: 10vw;
+  object-fit: contain;
+}
+
+.dashboard-header h1 {
+  font-size: 2.4vh;
+  font-weight: 600;
+  flex: 1;
+}
+
+.last-updated {
+  font-size: 1.4vh;
+  color: #8a90a2;
+}
+
+/* --- Shared panel + row + card primitives --- */
+
+.panel {
+  background: #171a23;
+  border: 1px solid #262a35;
+  border-radius: 12px;
+  padding: 2vh 1.5vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.panel h2 {
+  font-size: 1.9vh;
+  font-weight: 600;
+  margin-bottom: 1.5vh;
+  color: #ffffff;
+}
+
+.panel h3 {
+  font-size: 1.4vh;
+  font-weight: 600;
+  margin-bottom: 1vh;
+  color: #ffffff;
+}
+
+/* Generic horizontal row of equal-width items, used for the UniFi bar,
+   NinjaOne/Intune stat rows, the bottom two-box row, and the issues row. */
+.row {
+  display: flex;
+  gap: 1.5vw;
+}
+
+.row > * {
+  flex: 1;
+}
+
+.row-fixed {
+  flex: 0 0 auto;
+}
+
+.row-grow {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Generic dark rounded stat card, used for stat blocks and month blocks. */
+.card {
+  background: #1e222d;
+  border-radius: 10px;
+  padding: 1.5vh 0.5vw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.card.current {
+  border: 1px solid #4fd1c5;
+}
+
+.stat-value {
+  font-size: 3.2vh;
+  font-weight: 700;
+  color: #4fd1c5;
+}
+
+.stat-label {
+  font-size: 1.2vh;
+  color: #8a90a2;
+  text-align: center;
+  margin-top: 0.5vh;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* --- UniFi: horizontal bar across the top --- */
+.panel-unifi {
+  flex: 0 0 auto;
+}
+
+.unifi-connected-now {
+  flex: 0 0 22%;
+}
+
+.unifi-months {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1vw;
+}
+
+/* --- Bottom row: two shortened boxes, full width --- */
+.panel-square {
+  height: 22vh;
+}
+
+/* --- Pressing issues --- */
+.issue-list {
+  list-style: none;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7vh;
+}
+
+.issue-list li {
+  background: #1e222d;
+  border-left: 3px solid #e05252;
+  border-radius: 4px;
+  padding: 0.8vh 0.8vw;
+  font-size: 1.3vh;
+  color: #d7d9e0;
+}
+
+.issue-list li .issue-title {
+  font-weight: 600;
+  display: block;
+  color: #ffffff;
+}
+
+.issue-list:empty::after {
+  content: "No pressing issues";
+  color: #5c6272;
+  font-size: 1.3vh;
+  font-style: italic;
+}
+
+.panel-footer {
+  margin-top: 1vh;
+  font-size: 1.1vh;
+  color: #5c6272;
+}
+
+.panel-footer.error {
+  color: #e05252;
+}
