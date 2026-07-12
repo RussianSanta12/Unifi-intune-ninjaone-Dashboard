@@ -60,20 +60,34 @@ async function authenticatedGet(path) {
   return res.json();
 }
 
+// Follow @odata.nextLink so we get every managed device, not just the
+// first page (Graph pages at 1000 by default).
+async function getAllPages(path) {
+  const all = [];
+  let data = await authenticatedGet(path);
+  all.push(...(data.value || []));
+  while (data['@odata.nextLink']) {
+    const next = data['@odata.nextLink'].replace(GRAPH_BASE, '');
+    data = await authenticatedGet(next);
+    all.push(...(data.value || []));
+  }
+  return all;
+}
+
 async function getStats() {
   // managedDevices includes compliance state per device.
-  const data = await authenticatedGet(
+  const devices = await getAllPages(
     '/deviceManagement/managedDevices?$select=deviceName,complianceState,lastSyncDateTime'
   );
 
-  const devices = data.value || [];
   const nonCompliant = devices.filter((d) => d.complianceState !== 'compliant');
 
   return {
     ok: true,
     totalDevices: devices.length,
     nonCompliantCount: nonCompliant.length,
-    pressingIssues: nonCompliant.slice(0, 10).map((d) => ({
+    // Full list — the frontend auto-scrolls through it.
+    pressingIssues: nonCompliant.map((d) => ({
       deviceName: d.deviceName,
       complianceState: d.complianceState,
       lastSyncDateTime: d.lastSyncDateTime,

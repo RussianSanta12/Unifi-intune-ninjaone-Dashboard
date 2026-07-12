@@ -149,10 +149,18 @@ html, body {
 .issue-list {
   list-style: none;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 0.7vh;
+  /* Hide scrollbars — the list auto-scrolls instead */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.issue-list::-webkit-scrollbar {
+  display: none;
 }
 
 .issue-list li {
@@ -175,6 +183,36 @@ html, body {
   color: #5c6272;
   font-size: 1.3vh;
   font-style: italic;
+}
+
+.stat-value.stat-bad {
+  color: #e05252;
+}
+
+.stat-value.stat-warn {
+  color: #e0a852;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 1vh;
+  font-weight: 600;
+  padding: 0.1vh 0.4vw;
+  border-radius: 4px;
+  background: #262a35;
+  color: #8a90a2;
+  vertical-align: middle;
+  margin-left: 0.3vw;
+}
+
+.badge-bad {
+  background: rgba(224, 82, 82, 0.15);
+  color: #e05252;
+}
+
+.badge-warn {
+  background: rgba(224, 168, 82, 0.15);
+  color: #e0a852;
 }
 
 .panel-footer {

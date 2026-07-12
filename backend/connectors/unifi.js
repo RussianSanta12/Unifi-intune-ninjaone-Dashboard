@@ -1,109 +1,75 @@
-// UniFi connector — self-hosted Network Application (session-cookie auth).
+// UniFi connector — Site Manager API (Ubiquiti cloud, api.ui.com).
 //
-// When you migrate to a UniFi OS console, replace the login/cookie logic
-// below with a single "X-API-KEY" header (see comment at bottom of file).
+// Auth is a single X-API-KEY header — no login/session cookie needed.
+// Generate a key at unifi.ui.com (Integrations → Create New API Key,
+// or the account API keys page), and set UNIFI_API_KEY in .env.
+//
+// NOTE: this talks to Ubiquiti's cloud, not your controller directly, so
+// it requires your gateway/console to be linked to a Ubiquiti cloud
+// account and your dashboard server to have outbound internet access.
 
 const fetch = require('node-fetch');
-const https = require('https');
 
-const HOST = process.env.UNIFI_HOST; // e.g. https://192.168.1.1:8443
-const USERNAME = process.env.UNIFI_USERNAME;
-const PASSWORD = process.env.UNIFI_PASSWORD;
-const CONFIGURED_SITE = process.env.UNIFI_SITE || 'default';
-const VERIFY_SSL = (process.env.UNIFI_VERIFY_SSL || 'false').toLowerCase() === 'true';
+const API_KEY = process.env.UNIFI_API_KEY;
+const BASE_URL = 'https://api.ui.com';
+const CONFIGURED_SITE = process.env.UNIFI_SITE; // optional: workspace name/desc to filter to, if you have multiple
 
-// Self-hosted controllers commonly use a self-signed cert.
-const agent = new https.Agent({ rejectUnauthorized: VERIFY_SSL });
+// Cache of known workspaces (sites), refreshed periodically.
+let workspaceList = null; // [{ id, name }, ...]
+let workspaceListFetchedAt = 0;
+const WORKSPACE_LIST_TTL_MS = 10 * 60 * 1000; // re-check workspaces every 10 min
 
-let sessionCookie = null;
-
-// Cache of known sites on this controller, refreshed periodically.
-let siteList = null; // [{ name, desc }, ...]
-let siteListFetchedAt = 0;
-const SITE_LIST_TTL_MS = 10 * 60 * 1000; // re-check sites every 10 min
-
-// "Connected now" cycles slowly through all sites — one site advances per poll.
+// "Connected now" cycles slowly through all workspaces — one advances per poll.
 let cycleIndex = 0;
 
 // Unique-client snapshots, bucketed by calendar month, so we can report
-// "past three months" broken out by month name. NOTE: the UniFi controller
-// does not expose a true historical "unique clients per month" metric —
-// this data only accumulates from when the dashboard starts polling.
+// "past three months" broken out by month name. NOTE: Site Manager does not
+// expose a true historical "unique clients per month" metric — this data
+// only accumulates from when the dashboard starts polling.
 // Structure: { "2026-07": Set(macs), "2026-06": Set(macs), ... }
 const monthlyClientSets = {};
 const MONTHS_TO_KEEP = 3;
 
-async function login() {
-  if (!HOST || !USERNAME || !PASSWORD) {
-    throw new Error('UniFi credentials are not configured (check .env)');
-  }
-
-  const res = await fetch(`${HOST}/api/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
-    agent,
-  });
-
-  if (!res.ok) {
-    throw new Error(`UniFi login failed: ${res.status} ${res.statusText}`);
-  }
-
-  const setCookie = res.headers.raw()['set-cookie'];
-  if (!setCookie || setCookie.length === 0) {
-    throw new Error('UniFi login did not return a session cookie');
-  }
-
-  sessionCookie = setCookie.map((c) => c.split(';')[0]).join('; ');
-}
-
 async function authenticatedGet(path) {
-  if (!sessionCookie) {
-    await login();
+  if (!API_KEY) {
+    throw new Error('UniFi Site Manager API key is not configured (check .env)');
   }
 
-  let res = await fetch(`${HOST}${path}`, {
-    headers: { Cookie: sessionCookie },
-    agent,
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { 'X-API-KEY': API_KEY },
   });
 
-  // Session likely expired — re-login once and retry.
-  if (res.status === 401) {
-    await login();
-    res = await fetch(`${HOST}${path}`, {
-      headers: { Cookie: sessionCookie },
-      agent,
-    });
-  }
-
   if (!res.ok) {
-    throw new Error(`UniFi request failed (${path}): ${res.status} ${res.statusText}`);
+    throw new Error(`UniFi Site Manager request failed (${path}): ${res.status} ${res.statusText}`);
   }
 
   return res.json();
 }
 
-async function getSites() {
+async function getWorkspaces() {
   const now = Date.now();
-  if (siteList && now - siteListFetchedAt < SITE_LIST_TTL_MS) {
-    return siteList;
+  if (workspaceList && now - workspaceListFetchedAt < WORKSPACE_LIST_TTL_MS) {
+    return workspaceList;
   }
 
-  try {
-    const data = await authenticatedGet('/api/self/sites');
-    const sites = (data.data || []).map((s) => ({
-      name: s.name,
-      desc: s.desc || s.name,
-    }));
-    siteList = sites.length ? sites : [{ name: CONFIGURED_SITE, desc: CONFIGURED_SITE }];
-  } catch (err) {
-    // If site listing isn't available for some reason, fall back to the
-    // single configured site rather than failing the whole poll.
-    siteList = [{ name: CONFIGURED_SITE, desc: CONFIGURED_SITE }];
+  const data = await authenticatedGet('/v1/mobility/workspaces');
+  const workspaces = (data.data || []).map((w) => ({
+    id: w.workspaceId || w.id,
+    name: w.name || w.workspaceId || w.id,
+  }));
+
+  if (!workspaces.length) {
+    throw new Error('No UniFi Site Manager workspaces found for this API key');
   }
 
-  siteListFetchedAt = now;
-  return siteList;
+  workspaceList = CONFIGURED_SITE
+    ? workspaces.filter((w) => w.name === CONFIGURED_SITE).concat(
+        workspaces.filter((w) => w.name !== CONFIGURED_SITE)
+      )
+    : workspaces;
+
+  workspaceListFetchedAt = now;
+  return workspaceList;
 }
 
 function monthKey(date) {
@@ -114,7 +80,7 @@ function monthLabel(date) {
   return date.toLocaleString('en-US', { month: 'long' });
 }
 
-function recordSnapshot(clients) {
+function recordSnapshot(clientMacs) {
   const now = new Date();
   const key = monthKey(now);
 
@@ -122,8 +88,8 @@ function recordSnapshot(clients) {
     monthlyClientSets[key] = new Set();
   }
 
-  for (const c of clients) {
-    if (c.mac) monthlyClientSets[key].add(c.mac);
+  for (const mac of clientMacs) {
+    if (mac) monthlyClientSets[key].add(mac);
   }
 
   // Trim any month buckets outside our retention window.
@@ -153,30 +119,53 @@ function getMonthlyBreakdown() {
   return result; // [currentMonth, lastMonth, twoMonthsAgo]
 }
 
-async function getStats() {
-  const sites = await getSites();
+// Site Manager exposes clients per-device, not per-site in one call, so we
+// have to list devices in the workspace first, then fetch each device's
+// clients and sum them.
+async function getConnectedClientMacsForWorkspace(workspaceId) {
+  const devicesData = await authenticatedGet(`/v1/mobility/workspaces/${workspaceId}/devices`);
+  const devices = devicesData.data || [];
 
-  // Cycle slowly through all sites — one poll = one site's "connected now"
-  // count, advancing to the next site on the following poll.
-  const site = sites[cycleIndex % sites.length];
+  const clientLists = await Promise.all(
+    devices.map((d) =>
+      authenticatedGet(`/v1/mobility/workspaces/${workspaceId}/devices/${d.deviceId || d.id}/clients`).catch(
+        () => ({ data: [] }) // one device's client list failing shouldn't fail the whole poll
+      )
+    )
+  );
+
+  const macs = [];
+  for (const cl of clientLists) {
+    for (const c of cl.data || []) {
+      if (c.mac) macs.push(c.mac);
+    }
+  }
+  return macs;
+}
+
+async function getStats() {
+  const workspaces = await getWorkspaces();
+
+  // Cycle slowly through all workspaces — one poll = one workspace's
+  // "connected now" count, advancing to the next on the following poll.
+  const workspace = workspaces[cycleIndex % workspaces.length];
   cycleIndex += 1;
 
-  // /stat/sta returns currently connected clients for the site.
-  const data = await authenticatedGet(`/api/s/${site.name}/stat/sta`);
-  const clients = data.data || [];
+  const macs = await getConnectedClientMacsForWorkspace(workspace.id);
 
-  // Unique-client history is tracked against the configured "home" site
-  // (UNIFI_SITE) regardless of which site we're cycling through for the
-  // "connected now" display, so the monthly figures stay consistent.
-  if (site.name === CONFIGURED_SITE) {
-    recordSnapshot(clients);
+  // Unique-client history is tracked against the configured "home" workspace
+  // (UNIFI_SITE) if set, otherwise whichever workspace comes first in the
+  // cycle, so the monthly figures stay consistent.
+  const homeWorkspace = CONFIGURED_SITE ? workspaces.find((w) => w.name === CONFIGURED_SITE) : workspaces[0];
+  if (homeWorkspace && workspace.id === homeWorkspace.id) {
+    recordSnapshot(macs);
   }
 
   return {
     ok: true,
-    connectedNow: clients.length,
-    connectedNowSite: site.desc,
-    siteCount: sites.length,
+    connectedNow: macs.length,
+    connectedNowSite: workspace.name,
+    siteCount: workspaces.length,
     monthlyBreakdown: getMonthlyBreakdown(),
     updatedAt: new Date().toISOString(),
   };
@@ -185,22 +174,17 @@ async function getStats() {
 module.exports = { getStats };
 
 /*
- * --- UniFi OS migration notes ---
- * Once you're on a UniFi OS console, generate an API key at:
- *   Integrations → Create New API Key
- * Then replace login()/authenticatedGet() with a simple header call:
- *
- *   const res = await fetch(`${HOST}${path}`, {
- *     headers: { 'X-API-KEY': process.env.UNIFI_API_KEY },
- *     agent,
- *   });
- *
- * No cookie/session management needed, and rate limits are more generous.
- *
  * --- Note on historical monthly data ---
- * The controller does not expose a true "unique clients per month" metric
- * going backward in time — /stat/report/monthly.site gives periodic
- * concurrent-station counts, not unique MACs over the month. So the monthly
- * breakdown above only becomes accurate for months the dashboard has been
- * running continuously; it will read 0 for months before that.
+ * Site Manager does not expose a true "unique clients per month" metric
+ * going backward in time. So the monthly breakdown above only becomes
+ * accurate for months the dashboard has been running continuously; it will
+ * read 0 for months before that.
+ *
+ * --- Note on cloud dependency ---
+ * This connector calls Ubiquiti's cloud (api.ui.com), not your controller
+ * directly. It requires your gateway/console to be linked to a Ubiquiti
+ * cloud account and outbound internet access from wherever this backend
+ * runs. If you need a fully local/offline setup instead, use local
+ * controller auth (session cookie, or local API key on UniFi OS) against
+ * your controller's own IP instead of Site Manager.
  */
