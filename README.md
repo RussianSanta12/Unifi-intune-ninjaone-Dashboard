@@ -28,6 +28,27 @@ If ticket panels show a "no board named" or "no column" error, run `npm run disc
 
 Server output goes to `backend/server.log` and `backend/server.err.log`. To run it in the foreground instead, use `npm start` from `backend/`.
 
+### Linux / macOS
+
+Needs Node 20.6 or newer (Node 22 LTS recommended). Distro packages are often older; on Debian/Ubuntu use NodeSource:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+Then, from the project folder:
+
+```bash
+./start.sh          # installs deps if needed, starts in the background, opens the browser if there's a desktop
+./stop.sh           # shuts it down
+PORT=3001 ./start.sh  # use a different port without editing .env
+```
+
+`start.sh` also reinstalls dependencies when `package-lock.json` changes (for example after switching branches). On a headless server it just prints the URL; open it from the display machine at `http://<server-ip>:3000`.
+
+Only run one copy of the dashboard at a time (Windows or Linux): both would share the same NinjaOne API client, and each new sign-in cancels the other's.
+
 ## Notes
 
 - The backend polls each API on a timer (`REFRESH_INTERVAL_SECONDS` in `.env`, default 60s) and caches results in memory. The frontend just reads that cache every 30s — it never calls the external APIs directly, so your API keys never reach the browser.
