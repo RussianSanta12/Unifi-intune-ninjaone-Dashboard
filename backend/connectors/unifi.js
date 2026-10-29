@@ -13,8 +13,6 @@
 // it requires your gateway/console to be linked to a Ubiquiti cloud
 // account and your dashboard server to have outbound internet access.
 
-const fetch = require('node-fetch');
-
 const API_KEY = process.env.UNIFI_API_KEY;
 const BASE_URL = 'https://api.ui.com';
 const CONFIGURED_SITE = process.env.UNIFI_SITE; // optional: site name/desc to prefer, if you have multiple

@@ -33,7 +33,7 @@ $portLine = Select-String -Path $envFile -Pattern '^\s*PORT\s*=\s*(\d+)' | Selec
 if ($portLine) { $port = [int]$portLine.Matches[0].Groups[1].Value }
 $url = "http://localhost:$port"
 
-$proc = Start-Process -FilePath 'node' -ArgumentList 'server.js' -WorkingDirectory $backend `
+$proc = Start-Process -FilePath 'node' -ArgumentList '--env-file=.env', 'server.js' -WorkingDirectory $backend `
     -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput (Join-Path $backend 'server.log') `
     -RedirectStandardError (Join-Path $backend 'server.err.log')

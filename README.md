@@ -1,6 +1,6 @@
 # Stats Dashboard
 
-Locally hosted dashboard showing NinjaOne stats, sized for 16:9 displays.
+Locally hosted dashboard showing NinjaOne device health counts and open IT / AV support requests from NinjaOne Ticketing, sized for 16:9 displays.
 
 > **Scope:** UniFi and Intune are paused for now. Their connector files are still in `backend/connectors/`, but the backend doesn't poll them and the page doesn't show them. See PLAN.md.
 
@@ -9,7 +9,7 @@ Locally hosted dashboard showing NinjaOne stats, sized for 16:9 displays.
 ```
 Unifi-intune-ninjaone-Dashboard/
 ├── backend/          Node/Express server — polls NinjaOne, serves /api/stats + the frontend
-│   ├── connectors/   One module per integration (only ninjaone.js is active)
+│   ├── connectors/   One module per integration (active: ninjaone.js for device counts, tickets.js for IT/AV requests)
 │   ├── .env          Fill this in with your real credentials (gitignored)
 │   ├── .env.example  Safe-to-commit template
 │   └── server.js
@@ -23,6 +23,8 @@ Unifi-intune-ninjaone-Dashboard/
 2. Double-click `start.cmd` (or run `.\start.ps1`). It installs dependencies on first run, starts the server in the background, and opens http://localhost:3000.
 3. Double-click `stop.cmd` (or run `.\stop.ps1`) to shut it down.
 4. Open the URL fullscreen on whatever display you want the dashboard on.
+
+If ticket panels show a "no board named" or "no column" error, run `npm run discover` from `backend/` to print the real names from NinjaOne and fix them in `.env`.
 
 Server output goes to `backend/server.log` and `backend/server.err.log`. To run it in the foreground instead, use `npm start` from `backend/`.
 

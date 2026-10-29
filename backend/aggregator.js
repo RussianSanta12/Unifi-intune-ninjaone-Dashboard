@@ -7,8 +7,9 @@
 // ./connectors for later). To bring one back, add it to CONNECTORS below.
 
 const ninjaone = require('./connectors/ninjaone');
+const tickets = require('./connectors/tickets');
 
-const CONNECTORS = { ninjaone };
+const CONNECTORS = { ninjaone, tickets };
 
 const REFRESH_INTERVAL_SECONDS = parseInt(process.env.REFRESH_INTERVAL_SECONDS || '60', 10);
 
