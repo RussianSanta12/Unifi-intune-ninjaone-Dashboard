@@ -40,8 +40,17 @@ Self-hosted controller does **not** support the newer API-key auth (that's UniFi
 ### NinjaOne
 OAuth 2.0, **Client Credentials flow** (machine-to-machine, no user login needed):
 - In NinjaOne: Administration → Apps → API → Client app IDs → Add client app → platform = "API Services (machine-to-machine)".
-- Get `Client ID` + `Client Secret`.
-- Backend exchanges these for a bearer access token, refreshes it as needed, then calls device/alert endpoints for the "pressing issues" summary (offline devices, open alerts/tickets).
+- Scope: **Monitoring** only. Device, alert, and ticketing *reads* all work with it, so the dashboard stays read-only. Grant type: Client credentials only (no redirect URI needed).
+- Get `Client ID` + `Client Secret`. Auth/HTTP is shared in `backend/lib/ninja.js`.
+
+**Device counts** (`connectors/ninjaone.js`): Unhealthy / Needs Attention from `/v2/queries/device-health`, open alerts from `/v2/alerts`.
+
+**IT / AV support requests** (`connectors/tickets.js`), shown as two side-by-side panels:
+- Reads the existing NinjaOne boards "IT Support Requests" (form 1) and "AV Support Requests" (form 3) via `POST /v2/ticketing/trigger/board/{id}/run`, paginated with `lastCursorId`. Board runs include the assignee name and the board's custom-field columns, so no per-ticket calls.
+- Shows only statuses New, In Progress, Added to Calendar. (These are NinjaOne's built-in NEW / OPEN / WAITING renamed, ids 1000 / 2000 / 3000.) Board runs reject status filters, so filtering happens in the connector.
+- Each row: ticket ID, subject, primary assignee; AV also shows "Date of Event / Program" (custom field 14, a DATE). Status is shown only by the row's stripe color (New = blue, In Progress = gold, Added to Calendar = green) with a legend in each panel header.
+- Sort: New, then In Progress, then Added to Calendar; within a status, AV by soonest event date, IT by oldest ticket.
+- Board/field/status names are in `.env`; `npm run discover` prints the real values.
 
 ### Intune (via Microsoft Graph API)
 Azure AD app registration + client secret (app-only auth):

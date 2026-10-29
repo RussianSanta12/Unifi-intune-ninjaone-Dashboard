@@ -16,6 +16,13 @@
 
   --bad: #ff6b6b;         /* brightened red so it reads on navy */
   --warn: var(--brand-gold);
+
+  /* Ticket status colors, in NINJAONE_TICKET_STATUSES order:
+     New, In Progress, Added to Calendar. Blue/gold/green stay distinct
+     for red-green color blindness. */
+  --status-0: var(--brand-blue);
+  --status-1: var(--brand-gold);
+  --status-2: #3ecf8e;
 }
 
 * {
@@ -104,7 +111,8 @@ html, body {
   margin-bottom: 1vh;
 }
 
-/* Generic horizontal row of equal-width items, used for the stat cards. */
+/* Generic horizontal row of equal-width items, used for the stat cards
+   and the IT / AV ticket panels. */
 .row {
   display: flex;
   gap: 1.5vw;
@@ -112,6 +120,11 @@ html, body {
 
 .row > * {
   flex: 1;
+}
+
+.row-grow {
+  flex: 1;
+  min-height: 0;
 }
 
 /* Generic rounded stat card. */
@@ -145,10 +158,46 @@ html, body {
   flex: 0 0 auto;
 }
 
-/* --- Pressing issues: fills the rest of the screen --- */
+/* --- IT / AV ticket panels: fill the rest of the screen --- */
 .panel-issues {
-  flex: 1;
   min-height: 0;
+  min-width: 0;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1vw;
+  margin-bottom: 1vh;
+}
+
+.panel-heading h3 {
+  margin-bottom: 0;
+}
+
+.ticket-count {
+  color: var(--white);
+}
+
+.legend {
+  display: flex;
+  gap: 1vw;
+  font-size: 1.1vh;
+  color: var(--text-muted);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4vw;
+}
+
+.legend-dot {
+  width: 1.1vh;
+  height: 1.1vh;
+  border-radius: 50%;
+  background: var(--dot);
 }
 
 .issue-list {
@@ -170,30 +219,35 @@ html, body {
 
 .issue-list li {
   background: var(--card);
-  border-left: 3px solid var(--brand-blue);
   border-radius: 4px;
   padding: 0.8vh 0.8vw;
   font-size: 1.3vh;
   color: var(--text);
 }
 
-/* Stripe color follows the device's health status. */
-.issue-list li.issue-bad {
-  border-left-color: var(--bad);
+/* Stripe color is the ticket's status (see the legend). */
+.issue-list li {
+  border-left: 0.5vw solid var(--dot);
 }
 
-.issue-list li.issue-warn {
-  border-left-color: var(--warn);
-}
+.status-0 { --dot: var(--status-0); }
+.status-1 { --dot: var(--status-1); }
+.status-2 { --dot: var(--status-2); }
 
 .issue-list li .issue-title {
   font-weight: 600;
+  font-size: 1.5vh;
   display: block;
   color: var(--white);
 }
 
+.ticket-id {
+  color: var(--text-muted);
+  margin-right: 0.6vw;
+}
+
 .issue-list:empty::after {
-  content: "No pressing issues";
+  content: "No open requests";
   color: var(--text-faint);
   font-size: 1.3vh;
   font-style: italic;
@@ -204,28 +258,6 @@ html, body {
 }
 
 .stat-value.stat-warn {
-  color: var(--warn);
-}
-
-.badge {
-  display: inline-block;
-  font-size: 1vh;
-  font-weight: 600;
-  padding: 0.1vh 0.4vw;
-  border-radius: 4px;
-  background: var(--panel);
-  color: var(--text-muted);
-  vertical-align: middle;
-  margin-left: 0.3vw;
-}
-
-.badge-bad {
-  background: rgba(255, 107, 107, 0.18);
-  color: var(--bad);
-}
-
-.badge-warn {
-  background: rgba(252, 170, 0, 0.18);
   color: var(--warn);
 }
 

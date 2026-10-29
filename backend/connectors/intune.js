@@ -6,8 +6,6 @@
 // Application permissions → DeviceManagementManagedDevices.Read.All
 // → Grant admin consent.
 
-const fetch = require('node-fetch');
-
 const TENANT_ID = process.env.INTUNE_TENANT_ID;
 const CLIENT_ID = process.env.INTUNE_CLIENT_ID;
 const CLIENT_SECRET = process.env.INTUNE_CLIENT_SECRET;
