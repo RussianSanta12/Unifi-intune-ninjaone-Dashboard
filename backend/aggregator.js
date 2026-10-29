@@ -5,11 +5,15 @@
 //
 // UniFi and Intune are out of scope for now (connector files are kept in
 // ./connectors for later). To bring one back, add it to CONNECTORS below.
+//
+// calendarSync isn't shown on the page; it writes AV tickets to the events
+// calendar each poll, and its last run is visible at /api/stats.
 
 const ninjaone = require('./connectors/ninjaone');
 const tickets = require('./connectors/tickets');
+const calendarSync = require('./connectors/calendarSync');
 
-const CONNECTORS = { ninjaone, tickets };
+const CONNECTORS = { ninjaone, tickets, calendarSync };
 
 const REFRESH_INTERVAL_SECONDS = parseInt(process.env.REFRESH_INTERVAL_SECONDS || '60', 10);
 

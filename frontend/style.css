@@ -27,6 +27,7 @@
   /* Comment markers — brighter than the gold In Progress stripe. */
   --marker-public: #ffe600;
   --marker-private: #ff2d2d;
+  --marker-info: var(--white);  /* AV ticket needs event info */
   --on-fill: #001a40;     /* text on a filled (unassigned) row */
 }
 
@@ -207,10 +208,10 @@ html, body {
 
 .issue-list {
   list-style: none;
-  /* Widen the scroll box into the panel padding so the comment markers
-     (left of each row) aren't clipped; rows stay where they were. */
-  margin-left: -1.2vw;
-  padding-left: 1.2vw;
+  /* Widen the scroll box across the panel padding so the markers (left of
+     each row) aren't clipped; rows stay where they were. */
+  margin-left: -1.5vw;
+  padding-left: 1.5vw;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -278,6 +279,15 @@ html, body {
 
 .marker-private {
   background: var(--marker-private);
+}
+
+/* "Needs info" gets its own column left of the comment markers. */
+.markers-info {
+  left: -1.75vw;
+}
+
+.marker-info {
+  background: var(--marker-info);
 }
 
 .legend-box {
