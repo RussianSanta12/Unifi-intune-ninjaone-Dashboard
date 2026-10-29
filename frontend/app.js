@@ -97,15 +97,34 @@ function formatEventDate(iso) {
 function renderLegend(id, statuses) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.innerHTML = (statuses || [])
-    .map((name, i) => `<span class="legend-item"><span class="legend-dot status-${i}"></span>${escapeHtml(name)}</span>`)
-    .join('');
+  const items = (statuses || []).map(
+    (name, i) => `<span class="legend-item"><span class="legend-dot status-${i}"></span>${escapeHtml(name)}</span>`
+  );
+  if (items.length) {
+    items.push(
+      '<span class="legend-item"><span class="marker marker-public"></span>Public comment</span>',
+      '<span class="legend-item"><span class="marker marker-private"></span>Private note</span>',
+      '<span class="legend-item"><span class="legend-box"></span>Unassigned</span>'
+    );
+  }
+  el.innerHTML = items.join('');
+}
+
+// Comment markers sit in the margin left of the status stripe (see the
+// .markers CSS): one is centered, two stack yellow over red.
+function ticketMarkers(ticket) {
+  const markers = [];
+  if (ticket.publicMarker) markers.push('<span class="marker marker-public"></span>');
+  if (ticket.privateMarker) markers.push('<span class="marker marker-private"></span>');
+  return markers.length ? `<span class="markers">${markers.join('')}</span>` : '';
 }
 
 function ticketLabel(ticket) {
-  const details = [escapeHtml(ticket.assignee || 'Unassigned')];
+  const assignees = ticket.assignee ? [ticket.assignee, ...(ticket.additionalAssignees || [])].join(' + ') : 'Unassigned';
+  const details = [escapeHtml(assignees)];
   if ('eventDate' in ticket) details.push(`Event: ${escapeHtml(formatEventDate(ticket.eventDate))}`);
   return (
+    ticketMarkers(ticket) +
     `<span class="issue-title"><span class="ticket-id">#${escapeHtml(ticket.id)}</span>${escapeHtml(ticket.subject)}</span>` +
     details.join(' · ')
   );
@@ -117,7 +136,7 @@ function renderTicketSide(side, sideData, statuses) {
   renderLegend(`tickets-${side}-legend`, statuses);
   renderIssueList(`tickets-${side}`, ok ? sideData.tickets : [], ticketLabel, {
     autoScroll: true,
-    classFn: (ticket) => `status-${ticket.statusIndex}`,
+    classFn: (ticket) => `status-${ticket.statusIndex}` + (ticket.unassigned ? ' unassigned' : ''),
   });
   setStatus(`tickets-${side}-status`, sideData);
 }

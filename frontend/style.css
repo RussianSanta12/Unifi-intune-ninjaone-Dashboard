@@ -23,6 +23,11 @@
   --status-0: var(--brand-blue);
   --status-1: var(--brand-gold);
   --status-2: #3ecf8e;
+
+  /* Comment markers — brighter than the gold In Progress stripe. */
+  --marker-public: #ffe600;
+  --marker-private: #ff2d2d;
+  --on-fill: #001a40;     /* text on a filled (unassigned) row */
 }
 
 * {
@@ -202,6 +207,10 @@ html, body {
 
 .issue-list {
   list-style: none;
+  /* Widen the scroll box into the panel padding so the comment markers
+     (left of each row) aren't clipped; rows stay where they were. */
+  margin-left: -1.2vw;
+  padding-left: 1.2vw;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -227,7 +236,55 @@ html, body {
 
 /* Stripe color is the ticket's status (see the legend). */
 .issue-list li {
+  position: relative;
   border-left: 0.5vw solid var(--dot);
+}
+
+/* Unassigned: the whole row fills with its status color. */
+.issue-list li.unassigned {
+  background: var(--dot);
+  color: var(--on-fill);
+  font-weight: 600;
+}
+
+.issue-list li.unassigned .issue-title,
+.issue-list li.unassigned .ticket-id {
+  color: var(--on-fill);
+}
+
+/* Comment markers, in the margin left of the stripe: a single marker is
+   centered vertically, two stack with a gap. */
+.markers {
+  position: absolute;
+  left: -1.1vw;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6vh;
+}
+
+.marker {
+  display: inline-block;
+  width: 0.4vw;
+  height: 1.6vh;
+  border-radius: 2px;
+}
+
+.marker-public {
+  background: var(--marker-public);
+}
+
+.marker-private {
+  background: var(--marker-private);
+}
+
+.legend-box {
+  width: 1.6vh;
+  height: 1.1vh;
+  border-radius: 2px;
+  background: var(--status-0);
 }
 
 .status-0 { --dot: var(--status-0); }

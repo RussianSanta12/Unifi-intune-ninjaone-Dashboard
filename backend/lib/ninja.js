@@ -24,12 +24,24 @@ const REQUEST_TIMEOUT_MS = 15_000;
 
 let accessToken = null;
 let tokenExpiresAt = 0; // epoch ms
+let tokenRequest = null; // in-flight token fetch, shared by concurrent callers
 
+// NinjaOne revokes a client's previous token when it issues a new one, so
+// parallel requests must share one token fetch rather than each starting
+// their own (otherwise the earlier tokens 401).
 async function getAccessToken() {
   if (accessToken && Date.now() < tokenExpiresAt - 30_000) {
     return accessToken;
   }
+  if (!tokenRequest) {
+    tokenRequest = fetchAccessToken().finally(() => {
+      tokenRequest = null;
+    });
+  }
+  return tokenRequest;
+}
 
+async function fetchAccessToken() {
   if (!INSTANCE_URL || !CLIENT_ID || !CLIENT_SECRET) {
     throw new Error('NinjaOne credentials are not configured (check .env)');
   }
