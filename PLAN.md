@@ -1,5 +1,13 @@
 # Stats Dashboard — Plan
 
+> **Current scope (2026-10-29): NinjaOne only.** UniFi and Intune are paused
+> and will be revisited later. Their connectors (`backend/connectors/unifi.js`,
+> `intune.js`) are kept but not polled, and the page doesn't show them. To
+> re-enable one, add it to `CONNECTORS` in `backend/aggregator.js`, restore its
+> `.env` section, and add its panel back to the frontend. Note for later: the
+> current `unifi.js` uses the cloud Site Manager API, which conflicts with the
+> local-only decision below — settle that before re-enabling it.
+
 ## What it shows (16:9 layout, e.g. 1920x1080 or 1280x720)
 
 Three panels on one screen:

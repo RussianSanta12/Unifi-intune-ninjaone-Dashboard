@@ -1,3 +1,23 @@
+/* Colors are taken from the Ferguson Library logo (frontend/logo/logo.png):
+   navy #003e87, light blue #1f91c3, gold #fcaa00, white. */
+:root {
+  --brand-navy: #003e87;
+  --brand-blue: #1f91c3;
+  --brand-gold: #fcaa00;
+  --white: #ffffff;
+
+  --bg: #002456;          /* page — a deeper shade of the brand navy */
+  --panel: #003070;       /* panels sit between page and cards */
+  --card: var(--brand-navy);
+  --border: #0d4a95;
+  --text: #e8eef7;
+  --text-muted: #9fb6d6;
+  --text-faint: #6f8bb3;
+
+  --bad: #ff6b6b;         /* brightened red so it reads on navy */
+  --warn: var(--brand-gold);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -6,8 +26,8 @@
 
 html, body {
   height: 100%;
-  background: #0f1117;
-  color: #e6e8ee;
+  background: var(--bg);
+  color: var(--text);
   font-family: 'Segoe UI', Roboto, Arial, sans-serif;
   overflow: hidden;
 }
@@ -24,58 +44,67 @@ html, body {
   gap: 1.5vh;
 }
 
+/* Gold rule under the header echoes the bar in the logo. */
 .dashboard-header {
   display: flex;
   align-items: center;
   gap: 1.5vw;
   padding-bottom: 1.5vh;
-  border-bottom: 1px solid #262a35;
+  border-bottom: 0.4vh solid var(--brand-gold);
 }
 
+/* The logo is a rounded tile; the radius clips its square corners. */
 .dashboard-header .logo {
-  height: 5vh;
+  height: 7vh;
   max-width: 10vw;
   object-fit: contain;
+  border-radius: 15%;
 }
 
 .dashboard-header h1 {
-  font-size: 2.4vh;
+  font-size: 2.8vh;
   font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--white);
   flex: 1;
 }
 
 .last-updated {
   font-size: 1.4vh;
-  color: #8a90a2;
+  color: var(--text-muted);
 }
 
 /* --- Shared panel + row + card primitives --- */
 
 .panel {
-  background: #171a23;
-  border: 1px solid #262a35;
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 2vh 1.5vw;
   display: flex;
   flex-direction: column;
 }
 
+.panel h2,
+.panel h3 {
+  font-weight: 600;
+  color: var(--brand-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .panel h2 {
   font-size: 1.9vh;
-  font-weight: 600;
   margin-bottom: 1.5vh;
-  color: #ffffff;
 }
 
 .panel h3 {
-  font-size: 1.4vh;
-  font-weight: 600;
+  font-size: 1.5vh;
   margin-bottom: 1vh;
-  color: #ffffff;
 }
 
-/* Generic horizontal row of equal-width items, used for the UniFi bar,
-   NinjaOne/Intune stat rows, the bottom two-box row, and the issues row. */
+/* Generic horizontal row of equal-width items, used for the stat cards. */
 .row {
   display: flex;
   gap: 1.5vw;
@@ -85,18 +114,9 @@ html, body {
   flex: 1;
 }
 
-.row-fixed {
-  flex: 0 0 auto;
-}
-
-.row-grow {
-  flex: 1;
-  min-height: 0;
-}
-
-/* Generic dark rounded stat card, used for stat blocks and month blocks. */
+/* Generic rounded stat card. */
 .card {
-  background: #1e222d;
+  background: var(--card);
   border-radius: 10px;
   padding: 1.5vh 0.5vw;
   display: flex;
@@ -105,47 +125,32 @@ html, body {
   justify-content: center;
 }
 
-.card.current {
-  border: 1px solid #4fd1c5;
-}
-
 .stat-value {
-  font-size: 3.2vh;
+  font-size: 4vh;
   font-weight: 700;
-  color: #4fd1c5;
+  color: var(--white);
 }
 
 .stat-label {
   font-size: 1.2vh;
-  color: #8a90a2;
+  color: var(--text-muted);
   text-align: center;
   margin-top: 0.5vh;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-/* --- UniFi: horizontal bar across the top --- */
-.panel-unifi {
+/* --- NinjaOne stats bar across the top --- */
+.panel-stats {
   flex: 0 0 auto;
 }
 
-.unifi-connected-now {
-  flex: 0 0 22%;
-}
-
-.unifi-months {
+/* --- Pressing issues: fills the rest of the screen --- */
+.panel-issues {
   flex: 1;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 1vw;
+  min-height: 0;
 }
 
-/* --- Bottom row: two shortened boxes, full width --- */
-.panel-square {
-  height: 22vh;
-}
-
-/* --- Pressing issues --- */
 .issue-list {
   list-style: none;
   flex: 1;
@@ -164,33 +169,42 @@ html, body {
 }
 
 .issue-list li {
-  background: #1e222d;
-  border-left: 3px solid #e05252;
+  background: var(--card);
+  border-left: 3px solid var(--brand-blue);
   border-radius: 4px;
   padding: 0.8vh 0.8vw;
   font-size: 1.3vh;
-  color: #d7d9e0;
+  color: var(--text);
+}
+
+/* Stripe color follows the device's health status. */
+.issue-list li.issue-bad {
+  border-left-color: var(--bad);
+}
+
+.issue-list li.issue-warn {
+  border-left-color: var(--warn);
 }
 
 .issue-list li .issue-title {
   font-weight: 600;
   display: block;
-  color: #ffffff;
+  color: var(--white);
 }
 
 .issue-list:empty::after {
   content: "No pressing issues";
-  color: #5c6272;
+  color: var(--text-faint);
   font-size: 1.3vh;
   font-style: italic;
 }
 
 .stat-value.stat-bad {
-  color: #e05252;
+  color: var(--bad);
 }
 
 .stat-value.stat-warn {
-  color: #e0a852;
+  color: var(--warn);
 }
 
 .badge {
@@ -199,28 +213,28 @@ html, body {
   font-weight: 600;
   padding: 0.1vh 0.4vw;
   border-radius: 4px;
-  background: #262a35;
-  color: #8a90a2;
+  background: var(--panel);
+  color: var(--text-muted);
   vertical-align: middle;
   margin-left: 0.3vw;
 }
 
 .badge-bad {
-  background: rgba(224, 82, 82, 0.15);
-  color: #e05252;
+  background: rgba(255, 107, 107, 0.18);
+  color: var(--bad);
 }
 
 .badge-warn {
-  background: rgba(224, 168, 82, 0.15);
-  color: #e0a852;
+  background: rgba(252, 170, 0, 0.18);
+  color: var(--warn);
 }
 
 .panel-footer {
   margin-top: 1vh;
   font-size: 1.1vh;
-  color: #5c6272;
+  color: var(--text-faint);
 }
 
 .panel-footer.error {
-  color: #e05252;
+  color: var(--bad);
 }

@@ -21,7 +21,7 @@ function setStatus(id, panelData) {
 // reset the auto-scroll position mid-scroll.
 const issueListState = new Map(); // id -> { signature, raf }
 
-function renderIssueList(id, issues, labelFn, { autoScroll = false } = {}) {
+function renderIssueList(id, issues, labelFn, { autoScroll = false, classFn = null } = {}) {
   const el = document.getElementById(id);
   if (!el) return;
 
@@ -38,6 +38,7 @@ function renderIssueList(id, issues, labelFn, { autoScroll = false } = {}) {
   items.forEach((issue) => {
     const li = document.createElement('li');
     li.innerHTML = labelFn(issue);
+    if (classFn) li.className = classFn(issue);
     el.appendChild(li);
   });
 
@@ -74,55 +75,6 @@ function startAutoScroll(el, state) {
   });
 }
 
-// Fallback month placeholders (current month + prior two), computed locally
-// so the three blocks always render — with correct month names — even
-// before the backend has completed its first successful poll.
-function placeholderMonths() {
-  const now = new Date();
-  const months = [];
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    months.push({
-      month: d.toLocaleString('en-US', { month: 'long' }),
-      uniqueClients: null,
-    });
-  }
-  return months;
-}
-
-function renderUnifi(data) {
-  const monthsEl = document.getElementById('unifi-months');
-  const hasData = data && data.ok !== false;
-  const breakdown = (hasData && data.monthlyBreakdown) || placeholderMonths();
-
-  if (!hasData) {
-    setText('unifi-connected-now', '–');
-    setText('unifi-connected-now-label', 'Connected Now');
-  } else {
-    setText('unifi-connected-now', data.connectedNow ?? '–');
-    setText(
-      'unifi-connected-now-label',
-      data.connectedNowSite ? `Connected Now — ${data.connectedNowSite}` : 'Connected Now'
-    );
-  }
-
-  if (monthsEl) {
-    monthsEl.innerHTML = '';
-    breakdown.forEach((m, idx) => {
-      const block = document.createElement('div');
-      block.className = 'card' + (idx === 0 ? ' current' : '');
-      const value = m.uniqueClients === null || m.uniqueClients === undefined ? '–' : m.uniqueClients;
-      block.innerHTML = `
-        <span class="stat-value">${value}</span>
-        <span class="stat-label">${m.month}</span>
-      `;
-      monthsEl.appendChild(block);
-    });
-  }
-
-  setStatus('unifi-status', data);
-}
-
 function ninjaIssueLabel(issue) {
   const badges = [];
   if (issue.healthStatus) {
@@ -152,28 +104,12 @@ function renderNinjaOne(data) {
   setText('ninjaone-unhealthy', data.unhealthyCount ?? '–');
   setText('ninjaone-attention', data.needsAttentionCount ?? '–');
   setText('ninjaone-alerts', data.openAlertCount ?? '–');
-  renderIssueList('ninjaone-issues', data.pressingIssues, ninjaIssueLabel, { autoScroll: true });
+  renderIssueList('ninjaone-issues', data.pressingIssues, ninjaIssueLabel, {
+    autoScroll: true,
+    classFn: (issue) =>
+      issue.healthStatus === 'UNHEALTHY' ? 'issue-bad' : issue.healthStatus === 'NEEDS_ATTENTION' ? 'issue-warn' : '',
+  });
   setStatus('ninjaone-status', data);
-}
-
-function renderIntune(data) {
-  if (!data || data.ok === false) {
-    setText('intune-noncompliant', '–');
-    setText('intune-total', '–');
-    renderIssueList('intune-issues', [], () => '');
-    setStatus('intune-status', data);
-    return;
-  }
-  setText('intune-noncompliant', data.nonCompliantCount ?? '–');
-  setText('intune-total', data.totalDevices ?? '–');
-  renderIssueList(
-    'intune-issues',
-    data.pressingIssues,
-    (issue) =>
-      `<span class="issue-title">${issue.deviceName || 'Device'}</span>${issue.complianceState || 'unknown'}`,
-    { autoScroll: true }
-  );
-  setStatus('intune-status', data);
 }
 
 async function refresh() {
@@ -181,9 +117,7 @@ async function refresh() {
     const res = await fetch('/api/stats');
     const data = await res.json();
 
-    renderUnifi(data.unifi);
     renderNinjaOne(data.ninjaone);
-    renderIntune(data.intune);
 
     const lastUpdated = document.getElementById('last-updated');
     if (lastUpdated) {

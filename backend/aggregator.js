@@ -2,19 +2,20 @@
 // The frontend only ever talks to this cache via /api/stats — it never
 // triggers a live API call itself, so external rate limits stay controlled
 // in one place.
+//
+// UniFi and Intune are out of scope for now (connector files are kept in
+// ./connectors for later). To bring one back, add it to CONNECTORS below.
 
-const unifi = require('./connectors/unifi');
 const ninjaone = require('./connectors/ninjaone');
-const intune = require('./connectors/intune');
+
+const CONNECTORS = { ninjaone };
 
 const REFRESH_INTERVAL_SECONDS = parseInt(process.env.REFRESH_INTERVAL_SECONDS || '60', 10);
 
-const cache = {
-  unifi: { ok: false, error: 'Not yet polled' },
-  ninjaone: { ok: false, error: 'Not yet polled' },
-  intune: { ok: false, error: 'Not yet polled' },
-  lastPolledAt: null,
-};
+const cache = { lastPolledAt: null };
+for (const name of Object.keys(CONNECTORS)) {
+  cache[name] = { ok: false, error: 'Not yet polled' };
+}
 
 async function pollOne(name, connector) {
   try {
@@ -26,11 +27,7 @@ async function pollOne(name, connector) {
 }
 
 async function pollAll() {
-  await Promise.all([
-    pollOne('unifi', unifi),
-    pollOne('ninjaone', ninjaone),
-    pollOne('intune', intune),
-  ]);
+  await Promise.all(Object.entries(CONNECTORS).map(([name, connector]) => pollOne(name, connector)));
   cache.lastPolledAt = new Date().toISOString();
 }
 
