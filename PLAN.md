@@ -58,6 +58,14 @@ OAuth 2.0, **Client Credentials flow** (machine-to-machine, no user login needed
   - Both also clear when a **technician** changes the status at or after the comment (same save counts). Status changes by requesters or automation are ignored, because NinjaOne reopens tickets automatically on email replies (e.g. Closed → In Progress), which would otherwise hide the marker. No time-based expiry.
   - Costs 2 extra calls per shown ticket per poll (`GET /v2/ticketing/ticket/{id}` and `/log-entry`), plus one `GET /v2/user/technicians` for assignee names.
 
+**AV calendar sync** (`connectors/calendarSync.js`), runs every poll:
+- Every AV ticket in **New** goes on the shared events calendar (`CALENDAR_MAILBOX`, kept in `.env` only) via Microsoft Graph, then the ticket is set to **Added to Calendar** and assigned by the event's weekday: Mon–Wed → Brian Merida, Thu–Sun → Dante Pruitt (technician IDs in `.env`).
+- Start/end times are free text, parsed by `lib/eventTime.js`. The block starts at the earliest time in the start field, so "6pm (5pm setup)" starts at 5pm. Times without am/pm borrow from a neighbour ("5-6pm") or the other field; anything still unclear is not guessed.
+- Unreadable times: the ticket stays New, gets a **white "needs info" marker** (its own column, left of the comment markers), and is retried every 24 h. The marker clears when the ticket syncs or someone moves it out of New.
+- **Ticket writes need a NinjaOne "Web" app** (Authorization Code + refresh token): NinjaOne answers ticket updates from client-credentials apps with 405. A technician signs in once at `http://localhost:3000/auth/ninjaone/start` (server only); the refresh token is kept in `backend/data/` (gitignored), and changes show in ticket logs as that technician. The sync's own status change doesn't clear comment markers.
+- Graph uses its own app registration (`Calendars.ReadWrite`, limited to the events mailbox in Exchange Online), separate from the read-only Intune app.
+- Safety: `CALENDAR_SYNC_DRY_RUN=true` (default) only logs; events are tagged with the ticket ID so retries don't double-book; each update is read back, and the sync stops if a ticket's custom fields changed.
+
 ### Intune (via Microsoft Graph API)
 Azure AD app registration + client secret (app-only auth):
 - Azure Portal → App registrations → new app → Certificates & secrets → New client secret (expires ≤ 12 months, needs manual renewal — note the expiry).

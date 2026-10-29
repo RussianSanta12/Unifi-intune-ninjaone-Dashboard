@@ -8,12 +8,15 @@
 // Each shown ticket also gets two extra calls — its details (primary and
 // additional assignee IDs) and its log (comments, notes, status changes) —
 // to work out the comment markers; see commentMarkers() for the rules.
+// AV tickets the calendar sync couldn't schedule (unreadable event times)
+// also get a "needs info" marker; see ./calendarSync.js.
 //
 // Boards, the event-date field and statuses are matched by their display
 // names (set in .env, defaults below), so renaming one in NinjaOne means
 // updating .env to match.
 
 const ninja = require('../lib/ninja');
+const calendarSync = require('./calendarSync');
 
 const IT_BOARD = process.env.NINJAONE_IT_BOARD || 'IT Support Requests';
 const AV_BOARD = process.env.NINJAONE_AV_BOARD || 'AV Support Requests';
@@ -23,11 +26,13 @@ const STATUSES = (process.env.NINJAONE_TICKET_STATUSES || 'New,In Progress,Added
   .split(',')
   .map((s) => s.trim());
 
-const PAGE_SIZE = 200;
 const DETAIL_CONCURRENCY = 5; // parallel per-ticket lookups
 // A status change saved together with a comment can be logged a moment
 // before it; treat anything this close as "at the same time".
 const SAME_SAVE_SECONDS = 5;
+// The calendar sync's own status change is logged as the technician who
+// signed it in; ignore status changes this close to when it ran.
+const SYNC_STATUS_WINDOW_SECONDS = 120;
 
 // Runs fn over items with at most `limit` calls in flight.
 async function mapLimit(items, limit, fn) {
@@ -49,14 +54,23 @@ async function mapLimit(items, limit, fn) {
 // - private (red): the latest private note by anyone, assignee included.
 // Either one also clears when a technician changes the status at or after
 // it. Status changes by requesters or automation don't count, so an
-// automatic status flip on an email reply can't hide the marker.
-function commentMarkers(log, assigneeId) {
+// automatic status flip on an email reply can't hide the marker. Neither
+// does the calendar sync's change (syncedAt, epoch seconds), since no one
+// has read the comment yet.
+function commentMarkers(log, assigneeId, syncedAt) {
   const comments = log.filter((e) => e.type === 'COMMENT' && !e.system);
   const latest = (entries) => entries.reduce((max, e) => Math.max(max, e.createTime), -Infinity);
   const isAssignee = (e) => assigneeId != null && e.appUserContactType === 'TECHNICIAN' && e.appUserContactId === assigneeId;
 
   const lastStatusChange = latest(
-    log.filter((e) => e.changeDiff && e.changeDiff.status && e.appUserContactType === 'TECHNICIAN' && !e.automation)
+    log.filter(
+      (e) =>
+        e.changeDiff &&
+        e.changeDiff.status &&
+        e.appUserContactType === 'TECHNICIAN' &&
+        !e.automation &&
+        !(syncedAt != null && Math.abs(e.createTime - syncedAt) <= SYNC_STATUS_WINDOW_SECONDS)
+    )
   );
   const clearedByStatus = (time) => lastStatusChange >= time - SAME_SAVE_SECONDS;
 
@@ -82,27 +96,8 @@ async function ticketExtras(id, technicianNames) {
     additionalAssignees: (detail.additionalAssignedTechnicianIds || [])
       .filter((tid) => tid !== assigneeId)
       .map((tid) => technicianNames.get(tid) || `Technician #${tid}`),
-    ...commentMarkers(Array.isArray(log) ? log : [], assigneeId),
+    ...commentMarkers(Array.isArray(log) ? log : [], assigneeId, calendarSync.syncedAt(id)),
   };
-}
-
-// Board runs page with lastCursorId; a short page means we've seen them all.
-async function runBoard(boardId) {
-  const rows = [];
-  let attributes = {};
-  let cursor;
-  for (;;) {
-    const page = await ninja.post(`/v2/ticketing/trigger/board/${boardId}/run`, {
-      pageSize: PAGE_SIZE,
-      ...(cursor !== undefined ? { lastCursorId: cursor } : {}),
-    });
-    const data = page.data || [];
-    rows.push(...data);
-    attributes = (page.metadata && page.metadata.attributes) || attributes;
-    if (data.length < PAGE_SIZE) break;
-    cursor = page.metadata.lastCursorId;
-  }
-  return { rows, attributes };
 }
 
 async function loadBoard(boards, technicianNames, boardName, { eventDateField } = {}) {
@@ -111,7 +106,7 @@ async function loadBoard(boards, technicianNames, boardName, { eventDateField } 
     return { ok: false, error: `No NinjaOne board named "${boardName}" (check .env)` };
   }
 
-  const { rows, attributes } = await runBoard(board.id);
+  const { rows, attributes } = await ninja.runBoard(board.id);
 
   let eventDateId = null;
   if (eventDateField) {
@@ -143,9 +138,11 @@ async function loadBoard(boards, technicianNames, boardName, { eventDateField } 
     .sort((a, b) => a.statusIndex - b.statusIndex || a.sortKey - b.sortKey);
 
   const extras = await mapLimit(tickets, DETAIL_CONCURRENCY, (t) => ticketExtras(t.id, technicianNames));
+  const needsInfo = eventDateField ? calendarSync.needsInfoIds() : new Set();
   tickets.forEach((t, i) => {
     delete t.sortKey;
     Object.assign(t, extras[i]);
+    if (eventDateField) t.needsInfoMarker = needsInfo.has(t.id);
   });
   return { ok: true, count: tickets.length, tickets };
 }
