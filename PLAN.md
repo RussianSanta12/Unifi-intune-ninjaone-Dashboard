@@ -51,6 +51,12 @@ OAuth 2.0, **Client Credentials flow** (machine-to-machine, no user login needed
 - Each row: ticket ID, subject, primary assignee; AV also shows "Date of Event / Program" (custom field 14, a DATE). Status is shown only by the row's stripe color (New = blue, In Progress = gold, Added to Calendar = green) with a legend in each panel header.
 - Sort: New, then In Progress, then Added to Calendar; within a status, AV by soonest event date, IT by oldest ticket.
 - Board/field/status names are in `.env`; `npm run discover` prints the real values.
+- Each row also shows additional assignees after the primary ("Brian Merida + Jerome Nedderman"). **Unassigned** tickets fill the whole row with their status color so new tickets stand out.
+- **Comment markers** (in the margin left of the status stripe; one marker is centered, two stack yellow over red):
+  - **Yellow** = latest public comment by anyone other than the primary assignee. Clears when the assignee comments publicly after it.
+  - **Red** = latest private/internal note by anyone, *including* the primary assignee.
+  - Both also clear when a **technician** changes the status at or after the comment (same save counts). Status changes by requesters or automation are ignored, because NinjaOne reopens tickets automatically on email replies (e.g. Closed → In Progress), which would otherwise hide the marker. No time-based expiry.
+  - Costs 2 extra calls per shown ticket per poll (`GET /v2/ticketing/ticket/{id}` and `/log-entry`), plus one `GET /v2/user/technicians` for assignee names.
 
 ### Intune (via Microsoft Graph API)
 Azure AD app registration + client secret (app-only auth):
