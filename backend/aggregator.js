@@ -3,13 +3,13 @@
 // triggers a live API call itself, so external rate limits stay controlled
 // in one place.
 //
-// UniFi and Intune are out of scope for now (connector files are kept in
-// ./connectors for later). To bring one back, add it to CONNECTORS below.
+// UniFi, Intune and the NinjaOne device counts (ninjaone.js) are out of
+// scope for now (connector files are kept in ./connectors for later). To
+// bring one back, add it to CONNECTORS below.
 
-const ninjaone = require('./connectors/ninjaone');
 const tickets = require('./connectors/tickets');
 
-const CONNECTORS = { ninjaone, tickets };
+const CONNECTORS = { tickets };
 
 const REFRESH_INTERVAL_SECONDS = parseInt(process.env.REFRESH_INTERVAL_SECONDS || '60', 10);
 

@@ -13,23 +13,13 @@
       <span id="last-updated" class="last-updated">Loading…</span>
     </header>
 
-    <section class="panel panel-stats" id="panel-ninjaone">
-      <h2>NinjaOne</h2>
-      <div class="row">
-        <div class="card">
-          <span class="stat-value stat-bad" id="ninjaone-unhealthy">–</span>
-          <span class="stat-label">Unhealthy</span>
-        </div>
-        <div class="card">
-          <span class="stat-value stat-warn" id="ninjaone-attention">–</span>
-          <span class="stat-label">Needs Attention</span>
-        </div>
-        <div class="card">
-          <span class="stat-value" id="ninjaone-alerts">–</span>
-          <span class="stat-label">Open Alerts</span>
-        </div>
+    <section class="panel panel-week" id="panel-week">
+      <div class="panel-heading">
+        <h3>AV Events This Week <span class="ticket-count" id="week-count"></span></h3>
+        <span class="month-label" id="week-range"></span>
       </div>
-      <div class="panel-footer" id="ninjaone-status"></div>
+      <div class="week-grid" id="week"></div>
+      <div class="panel-footer" id="week-status"></div>
     </section>
 
     <section class="row row-grow">
@@ -44,9 +34,9 @@
       <div class="panel panel-issues" id="panel-tickets-av">
         <div class="panel-heading">
           <h3>AV Support Requests <span class="ticket-count" id="tickets-av-count"></span></h3>
+          <div class="legend cal-legend" id="tickets-av-legend"></div>
           <span class="month-label" id="tickets-av-month"></span>
         </div>
-        <div class="legend cal-legend" id="tickets-av-legend"></div>
         <div class="cal-weekdays">
           <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
         </div>

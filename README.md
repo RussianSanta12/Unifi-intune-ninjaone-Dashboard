@@ -1,6 +1,6 @@
 # Stats Dashboard
 
-Locally hosted dashboard showing NinjaOne device health counts and open IT support requests and an AV support-request monthly calendar from NinjaOne Ticketing, sized for 16:9 displays.
+Locally hosted dashboard showing this week's AV events, open IT support requests and an AV support-request monthly calendar from NinjaOne Ticketing, sized for 16:9 displays.
 
 > **Scope:** UniFi and Intune are paused for now. Their connector files are still in `backend/connectors/`, but the backend doesn't poll them and the page doesn't show them. See PLAN.md.
 
@@ -9,7 +9,7 @@ Locally hosted dashboard showing NinjaOne device health counts and open IT suppo
 ```
 Unifi-intune-ninjaone-Dashboard/
 ├── backend/          Node/Express server — polls NinjaOne, serves /api/stats + the frontend
-│   ├── connectors/   One module per integration (active: ninjaone.js for device counts, tickets.js for IT/AV requests)
+│   ├── connectors/   One module per integration (active: tickets.js for IT/AV requests; ninjaone.js device counts are kept but not polled)
 │   ├── .env          Fill this in with your real credentials (gitignored)
 │   ├── .env.example  Safe-to-commit template
 │   └── server.js

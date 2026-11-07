@@ -2,16 +2,17 @@
 //
 // Reads two ticket boards that already exist in NinjaOne, each filtered to
 // one ticket form ("IT Support Request" / "AV Support Request"). Running a
-// board returns the assignee's name and the board's custom-field columns, so
-// one paginated call per board gets everything — no per-ticket lookups.
+// board returns the assignee's name, the requester's name and the board's
+// custom-field columns in one paginated call per board.
 //
 // Each shown ticket also gets two extra calls — its details (primary and
-// additional assignee IDs) and its log (comments, notes, status changes) —
-// to work out the comment markers; see commentMarkers() for the rules.
+// additional assignee IDs, every form field) and its log (comments, notes,
+// status changes) — to work out the comment markers; see commentMarkers()
+// for the rules. Closed AV tickets get the details call only.
 //
-// Boards, the event-date field and statuses are matched by their display
-// names (set in .env, defaults below), so renaming one in NinjaOne means
-// updating .env to match.
+// Boards, fields and statuses are matched by their display names (set in
+// .env, defaults below), so renaming one in NinjaOne means updating .env to
+// match.
 
 const ninja = require('../lib/ninja');
 
@@ -23,13 +24,20 @@ const STATUSES = (process.env.NINJAONE_TICKET_STATUSES || 'New,In Progress,Added
   .split(',')
   .map((s) => s.trim());
 // AV only: closed tickets stay on the calendar (shown brown). Only ones whose
-// event falls in the calendar's range are kept, and they skip the extra
-// per-ticket calls since closed tickets show no markers.
+// event falls in the calendar's range are kept, and they skip the log call
+// since closed tickets show no markers.
 const AV_CLOSED_STATUS = process.env.NINJAONE_AV_CLOSED_STATUS || 'Closed';
 const CLOSED_RANGE_PAD_DAYS = 7; // the grid spills up to 6 days into the neighboring months
-// AV recurring events: a checkbox, and a text list of extra days ("11:4, 11:16").
-const AV_RECURRING_FIELD = process.env.NINJAONE_AV_RECURRING_FIELD || 'Reocurring Event';
-const AV_RECURRING_DAYS_FIELD = process.env.NINJAONE_AV_RECURRING_DAYS_FIELD || 'Reocurring Days';
+// AV form fields shown on the weekly calendar. These don't need to be board
+// columns; anything the board lacks is read from the ticket's details.
+const AV_FIELDS = {
+  startTime: process.env.NINJAONE_AV_START_TIME_FIELD || 'Event Start Time',
+  endTime: process.env.NINJAONE_AV_END_TIME_FIELD || 'End Time',
+  location: process.env.NINJAONE_AV_LOCATION_FIELD || 'Location(IT)',
+  // Recurring events: a checkbox, and a text list of extra days ("11:4, 11:16").
+  recurring: process.env.NINJAONE_AV_RECURRING_FIELD || 'Reoccurring Event',
+  recurringDays: process.env.NINJAONE_AV_RECURRING_DAYS_FIELD || 'Reoccurring Days',
+};
 
 const PAGE_SIZE = 200;
 const DETAIL_CONCURRENCY = 5; // parallel per-ticket lookups
@@ -79,11 +87,16 @@ function commentMarkers(log, assigneeId) {
   };
 }
 
-async function ticketExtras(id, technicianNames) {
+// Open tickets: assignees + comment markers. Closed tickets (withMarkers
+// false) only need the form fields, so they skip the log call.
+async function ticketDetails(id, technicianNames, { withMarkers }) {
   const [detail, log] = await Promise.all([
     ninja.get(`/v2/ticketing/ticket/${id}`),
-    ninja.get(`/v2/ticketing/ticket/${id}/log-entry`),
+    withMarkers ? ninja.get(`/v2/ticketing/ticket/${id}/log-entry`) : null,
   ]);
+  // Every field on the ticket's form, for fields the board has no column for.
+  const attributeValues = detail.attributeValues || [];
+  if (!withMarkers) return { extras: {}, attributeValues };
   const assigneeId = detail.assignedAppUserId ?? null;
   return {
     extras: {
@@ -93,8 +106,7 @@ async function ticketExtras(id, technicianNames) {
         .map((tid) => technicianNames.get(tid) || `Technician #${tid}`),
       ...commentMarkers(Array.isArray(log) ? log : [], assigneeId),
     },
-    // Every field on the ticket's form, for fields the board has no column for.
-    attributeValues: detail.attributeValues || [],
+    attributeValues,
   };
 }
 
@@ -130,12 +142,30 @@ function parseRecurringDays(text, baseMs) {
   return [...days].sort((a, b) => a - b);
 }
 
-let warnedMissingRecurring = false; // log a missing recurring field once, not every poll
+// Looks a form field up by name: its ID, plus a text formatter that turns a
+// dropdown's option ID into the option's name (board runs already return the
+// name; ticket details return the ID).
+function fieldLookup(boardAttributes, allAttributes) {
+  return (name) => {
+    const boardId = Object.keys(boardAttributes).find((id) => boardAttributes[id].name === name);
+    const def = allAttributes.find((a) => a.name === name);
+    const id = boardId ?? (def && def.id);
+    if (id == null) return null;
+    const options = new Map(((def && def.content && def.content.values) || []).map((o) => [o.id, o.name]));
+    return {
+      id,
+      text: (value) => (value === undefined || value === null || value === '' ? null : options.get(value) ?? String(value)),
+    };
+  };
+}
 
-function recurringDates(values, ids, baseMs) {
-  const checked = attributeValue(values, ids.checkbox);
-  if (checked === undefined) return undefined;
-  return isChecked(checked) ? parseRecurringDays(attributeValue(values, ids.days), baseMs) : [];
+const warnedMissingFields = new Set(); // log each missing field once, not every poll
+
+// The current month padded by a week each side, as epoch ms [start, end).
+function calendarRange(now = new Date()) {
+  const start = new Date(now.getFullYear(), now.getMonth(), 1 - CLOSED_RANGE_PAD_DAYS);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1 + CLOSED_RANGE_PAD_DAYS);
+  return [start.getTime(), end.getTime()];
 }
 
 // Board runs page with lastCursorId; a short page means we've seen them all.
@@ -157,14 +187,9 @@ async function runBoard(boardId) {
   return { rows, attributes };
 }
 
-// The current month padded by a week each side, as epoch ms [start, end).
-function calendarRange(now = new Date()) {
-  const start = new Date(now.getFullYear(), now.getMonth(), 1 - CLOSED_RANGE_PAD_DAYS);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1 + CLOSED_RANGE_PAD_DAYS);
-  return [start.getTime(), end.getTime()];
-}
-
-async function loadBoard(boards, technicianNames, boardName, { eventDateField, closedStatus, recurring, allAttributes = [] } = {}) {
+// `av` turns on the AV extras: event date, closed tickets, the weekly
+// calendar's fields and recurring days.
+async function loadBoard(boards, technicianNames, boardName, { av = false, allAttributes = [] } = {}) {
   const board = boards.find((b) => b.name === boardName);
   if (!board) {
     return { ok: false, error: `No NinjaOne board named "${boardName}" (check .env)` };
@@ -173,80 +198,96 @@ async function loadBoard(boards, technicianNames, boardName, { eventDateField, c
   const { rows, attributes } = await runBoard(board.id);
 
   let eventDateId = null;
-  if (eventDateField) {
-    eventDateId = Object.keys(attributes).find((id) => attributes[id].name === eventDateField);
+  let fields = null;
+  if (av) {
+    eventDateId = Object.keys(attributes).find((id) => attributes[id].name === AV_EVENT_DATE_FIELD);
     if (!eventDateId) {
-      return { ok: false, error: `Board "${boardName}" has no "${eventDateField}" column (check .env)` };
+      return { ok: false, error: `Board "${boardName}" has no "${AV_EVENT_DATE_FIELD}" column (check .env)` };
+    }
+    const lookup = fieldLookup(attributes, allAttributes);
+    fields = Object.fromEntries(Object.entries(AV_FIELDS).map(([key, name]) => [key, lookup(name)]));
+    for (const [key, field] of Object.entries(fields)) {
+      if (!field && !warnedMissingFields.has(key)) {
+        warnedMissingFields.add(key);
+        console.warn(`[tickets] No ticket field named "${AV_FIELDS[key]}" (check .env); it won't be shown`);
+      }
     }
   }
 
-  // Recurring fields don't need to be board columns: if they aren't, open
-  // tickets read them from their details instead (closed tickets can't, as
-  // they skip the detail call).
-  const fieldId = (name) =>
-    Object.keys(attributes).find((id) => attributes[id].name === name) ??
-    (allAttributes.find((a) => a.name === name) || {}).id;
-  const recurringIds = recurring ? { checkbox: fieldId(recurring.checkboxField), days: fieldId(recurring.daysField) } : null;
-  if (recurring && (recurringIds.checkbox == null || recurringIds.days == null) && !warnedMissingRecurring) {
-    warnedMissingRecurring = true;
-    console.warn(`[tickets] No "${recurring.checkboxField}" / "${recurring.daysField}" fields found; recurring days are ignored`);
-  }
-  const recurringFor = (values, ticket) =>
-    recurringIds ? recurringDates(values, recurringIds, ticket.eventDate ? Date.parse(ticket.eventDate) : null) : [];
+  // A field's value from the board row, else from the ticket's details.
+  // undefined = not in either (yet).
+  const read = (ticket, field) => {
+    if (!field) return undefined;
+    const fromBoard = attributeValue(ticket.boardValues, field.id);
+    return fromBoard !== undefined ? fromBoard : attributeValue(ticket.detailValues, field.id);
+  };
+  const recurringMs = (ticket) => {
+    const checked = read(ticket, fields.recurring);
+    if (checked === undefined) return undefined;
+    return isChecked(checked) ? parseRecurringDays(read(ticket, fields.recurringDays), ticket.sortKey) : [];
+  };
 
   const [rangeStart, rangeEnd] = calendarRange();
   const inRange = (ms) => ms >= rangeStart && ms < rangeEnd;
   const tickets = rows
     .map((t) => {
       const statusName = t.status && t.status.displayName;
-      return { ...t, closed: !!closedStatus && statusName === closedStatus, statusIndex: STATUSES.indexOf(statusName) };
+      const closed = av && statusName === AV_CLOSED_STATUS;
+      return { row: t, closed, statusIndex: STATUSES.indexOf(statusName) };
     })
     .filter((t) => t.statusIndex !== -1 || t.closed)
-    .map((t) => {
+    .map(({ row, closed, statusIndex }) => {
       const ticket = {
-        id: t.id,
-        statusIndex: t.closed ? null : t.statusIndex,
-        subject: t.summary || '',
-        assignee: t.assignedAppUser || null,
+        id: row.id,
+        statusIndex: closed ? null : statusIndex,
+        subject: row.summary || '',
+        assignee: row.assignedAppUser || null,
         // Within a status: soonest event first (AV), otherwise oldest ticket first.
-        sortKey: t.createTime * 1000,
+        sortKey: row.createTime * 1000,
       };
-      if (t.closed) ticket.closed = true;
-      if (eventDateId) {
-        const value = (t.attributeValues || []).find((v) => String(v.attributeId) === eventDateId);
-        ticket.eventDate = value && value.value ? new Date(value.value).toISOString() : null;
-        ticket.sortKey = value && value.value ? value.value : Infinity; // no date sorts last
+      if (closed) ticket.closed = true;
+      if (av) {
+        const value = attributeValue(row.attributeValues, eventDateId);
+        ticket.eventDate = value ? new Date(value).toISOString() : null;
+        ticket.sortKey = value || Infinity; // no date sorts last
+        ticket.requester = row.requester || null;
+        ticket.boardValues = row.attributeValues || [];
       }
-      if (recurringIds) ticket.recurringMs = recurringFor(t.attributeValues, ticket); // undefined = not on the board
       return ticket;
     })
-    // Closed tickets only matter if one of their days is on the calendar.
-    .filter((t) => !t.closed || inRange(t.sortKey) || (t.recurringMs || []).some(inRange))
+    // Closed tickets only matter if one of their days is on the calendar
+    // (recurring days only count here if the board has those columns).
+    .filter((t) => !t.closed || inRange(t.sortKey) || (recurringMs(t) || []).some(inRange))
     .sort((a, b) => !!a.closed - !!b.closed || a.statusIndex - b.statusIndex || a.sortKey - b.sortKey);
 
-  const open = tickets.filter((t) => !t.closed);
-  const details = await mapLimit(open, DETAIL_CONCURRENCY, (t) => ticketExtras(t.id, technicianNames));
-  open.forEach((t, i) => {
+  const details = await mapLimit(tickets, DETAIL_CONCURRENCY, (t) =>
+    ticketDetails(t.id, technicianNames, { withMarkers: !t.closed })
+  );
+  tickets.forEach((t, i) => {
     Object.assign(t, details[i].extras);
-    if (recurringIds && t.recurringMs === undefined) t.recurringMs = recurringFor(details[i].attributeValues, t);
-  });
-  tickets.forEach((t) => {
-    delete t.sortKey;
-    if (recurringIds) {
+    if (av) {
+      t.detailValues = details[i].attributeValues;
+      const text = (field) => (field ? field.text(read(t, field)) : null);
+      t.startTime = text(fields.startTime);
+      t.endTime = text(fields.endTime);
+      t.location = text(fields.location);
       // Extra days besides the event date itself.
       const eventMs = t.eventDate ? Date.parse(t.eventDate) : null;
-      t.recurringDates = (t.recurringMs || []).filter((ms) => ms !== eventMs).map((ms) => new Date(ms).toISOString());
-      delete t.recurringMs;
+      t.recurringDates = (recurringMs(t) || []).filter((ms) => ms !== eventMs).map((ms) => new Date(ms).toISOString());
+      delete t.boardValues;
+      delete t.detailValues;
     }
+    delete t.sortKey;
   });
-  return { ok: true, count: open.length, tickets };
+  return { ok: true, count: tickets.filter((t) => !t.closed).length, tickets };
 }
 
 async function getStats() {
   const [boards, technicians, allAttributes] = await Promise.all([
     ninja.get('/v2/ticketing/trigger/boards'),
     ninja.get('/v2/user/technicians'),
-    // Only used to find the recurring fields' IDs; not fatal if it fails.
+    // Field definitions, for AV fields that aren't board columns and for
+    // dropdown option names; not fatal if it fails.
     ninja.get('/v2/ticketing/attributes').catch((err) => {
       console.warn(`[tickets] Could not list ticket fields: ${err.message}`);
       return [];
@@ -257,12 +298,7 @@ async function getStats() {
   );
   const [it, av] = await Promise.all([
     loadBoard(boards, technicianNames, IT_BOARD),
-    loadBoard(boards, technicianNames, AV_BOARD, {
-      eventDateField: AV_EVENT_DATE_FIELD,
-      closedStatus: AV_CLOSED_STATUS,
-      recurring: { checkboxField: AV_RECURRING_FIELD, daysField: AV_RECURRING_DAYS_FIELD },
-      allAttributes: Array.isArray(allAttributes) ? allAttributes : [],
-    }),
+    loadBoard(boards, technicianNames, AV_BOARD, { av: true, allAttributes: Array.isArray(allAttributes) ? allAttributes : [] }),
   ]);
   return { ok: true, statuses: STATUSES, it, av };
 }

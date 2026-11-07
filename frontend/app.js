@@ -19,7 +19,7 @@ function setStatus(id, panelData) {
 
 // Per-list state so an unchanged refresh doesn't rebuild the DOM and
 // reset the auto-scroll position mid-scroll.
-const issueListState = new Map(); // id -> { signature, raf }
+const issueListState = new Map(); // id -> { signature }
 
 function renderIssueList(id, issues, labelFn, { autoScroll = false, classFn = null } = {}) {
   const el = document.getElementById(id);
@@ -30,8 +30,7 @@ function renderIssueList(id, issues, labelFn, { autoScroll = false, classFn = nu
   const prev = issueListState.get(id);
   if (prev && prev.signature === signature) return; // data unchanged — leave it alone
 
-  if (prev && prev.raf) cancelAnimationFrame(prev.raf);
-  const state = { signature, raf: null };
+  const state = { signature };
   issueListState.set(id, state);
 
   el.innerHTML = '';
@@ -42,21 +41,24 @@ function renderIssueList(id, issues, labelFn, { autoScroll = false, classFn = nu
     el.appendChild(li);
   });
 
-  if (autoScroll && items.length) startAutoScroll(el, state);
+  if (autoScroll && items.length) {
+    startAutoScroll(el, AUTO_SCROLL_PX_PER_SEC, () => issueListState.get(id) === state);
+  }
 }
 
-// Continuously scrolls the list (no visible scrollbar). Items are cloned
-// once so the loop wraps seamlessly. Only activates when content overflows.
+// Continuously scrolls a box (no visible scrollbar). Its children are cloned
+// once so the loop wraps seamlessly. Only activates when content overflows;
+// stops once isCurrent() turns false (the box was re-rendered).
 const AUTO_SCROLL_PX_PER_SEC = 35;
 
-function startAutoScroll(el, state) {
+function startAutoScroll(el, pxPerSec, isCurrent) {
   requestAnimationFrame(() => {
-    if (state !== issueListState.get(el.id)) return; // superseded by a re-render
+    if (!isCurrent()) return;
     el.scrollTop = 0;
     if (el.scrollHeight <= el.clientHeight + 1) return; // everything fits — no scroll needed
 
     const originals = Array.from(el.children);
-    originals.forEach((li) => el.appendChild(li.cloneNode(true)));
+    originals.forEach((child) => el.appendChild(child.cloneNode(true)));
 
     // Exact loop distance: from the first item to its clone.
     const loopHeight = el.children[originals.length].offsetTop - el.children[0].offsetTop;
@@ -64,28 +66,20 @@ function startAutoScroll(el, state) {
     let pos = 0;
     let last = performance.now();
     function step(now) {
-      if (state !== issueListState.get(el.id)) return;
-      pos += (AUTO_SCROLL_PX_PER_SEC * (now - last)) / 1000;
+      if (!isCurrent()) return;
+      pos += (pxPerSec * (now - last)) / 1000;
       last = now;
       if (pos >= loopHeight) pos -= loopHeight;
       el.scrollTop = pos;
-      state.raf = requestAnimationFrame(step);
+      requestAnimationFrame(step);
     }
-    state.raf = requestAnimationFrame(step);
+    requestAnimationFrame(step);
   });
 }
 
 // Ticket text comes from end users, so escape it before it goes into innerHTML.
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
-
-function renderNinjaOne(data) {
-  const ok = data && data.ok !== false;
-  setText('ninjaone-unhealthy', ok ? data.unhealthyCount ?? '–' : '–');
-  setText('ninjaone-attention', ok ? data.needsAttentionCount ?? '–' : '–');
-  setText('ninjaone-alerts', ok ? data.openAlertCount ?? '–' : '–');
-  setStatus('ninjaone-status', data);
 }
 
 // Status is shown only as the row's stripe color; the legend is the key.
@@ -159,17 +153,17 @@ function avLegend(unassignedCount) {
   ].join('');
 }
 
+// Ticket # and title, wrapping to two lines; the week panel above carries
+// the details. The space after the # lets the title wrap between words.
 function calendarTicket(ticket) {
   const classes = ['cal-ticket'];
   if (ticket.closed) classes.push('closed');
   else classes.push(`status-${ticket.statusIndex}`);
   if (ticket.unassigned) classes.push('unassigned');
-  const assignees = ticket.assignee ? [ticket.assignee, ...(ticket.additionalAssignees || [])].join(' + ') : 'Unassigned';
   return (
     `<div class="${classes.join(' ')}">` +
     (ticket.closed ? '' : ticketMarkers(ticket)) +
-    `<span class="cal-title"><span class="ticket-id">#${escapeHtml(ticket.id)}</span>${escapeHtml(ticket.subject)}</span>` +
-    `<span class="cal-who">${escapeHtml(assignees)}</span>` +
+    `<span class="cal-title"><span class="ticket-id">#${escapeHtml(ticket.id)}</span> ${escapeHtml(ticket.subject)}</span>` +
     '</div>'
   );
 }
@@ -190,7 +184,8 @@ function compareCalendarTickets(a, b) {
   return !!a.closed - !!b.closed || !!b.unassigned - !!a.unassigned || a.statusIndex - b.statusIndex;
 }
 
-// Each day shows as many tickets as fit; the rest collapse into "+N more".
+// Each day shows as many tickets as fit; the rest collapse into "+N more",
+// which sits in the day's header row so it doesn't cost a line.
 function fitCalendarDay(cell) {
   const cards = Array.from(cell.querySelectorAll('.cal-ticket'));
   let hidden = 0;
@@ -201,7 +196,7 @@ function fitCalendarDay(cell) {
     if (!more) {
       more = document.createElement('span');
       more.className = 'cal-more';
-      cell.appendChild(more);
+      cell.querySelector('.cal-day-head').insertBefore(more, cell.querySelector('.cal-day-num'));
     }
     more.textContent = `+${hidden} more`;
   }
@@ -257,7 +252,7 @@ function renderAvCalendar(sideData) {
     cells.push(
       `<div class="${classes.join(' ')}">` +
         '<div class="cal-day-head">' +
-        (unassigned ? `<span class="cal-unassigned">&#9888; ${unassigned} unassigned</span>` : '') +
+        (unassigned ? `<span class="cal-unassigned">&#9888; ${unassigned}</span>` : '') +
         `<span class="cal-day-num">${day.getDate()}</span>` +
         '</div>' +
         dayTickets.map(calendarTicket).join('') +
@@ -282,16 +277,127 @@ function renderAvCalendar(sideData) {
   setStatus('tickets-av-status', sideData);
 }
 
+// --- AV events this week (top panel) ---
+// Sun–Sat of the current week, so it moves to the next week once Saturday
+// ends. One column per day with full event details; a column that overflows
+// scrolls slowly on its own.
+
+const WEEK_SCROLL_PX_PER_SEC = 12;
+
+let weekSignature = null;
+
+// Rough start time in minutes, only for ordering a day's events. Times are
+// free text ("6:30pm (5:30 setup)", "5-6:30pm"); a missing am/pm is taken
+// from later in the text, else 1–6 count as pm. Unreadable times sort last.
+function startMinutes(text) {
+  const value = String(text || '');
+  if (/\bnoon\b/i.test(value)) return 12 * 60;
+  const match = value.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])?\.?\s*m?\b/i);
+  if (!match) return Infinity;
+  const hour = Number(match[1]);
+  if (hour < 1 || hour > 23) return Infinity;
+  if (hour > 12) return hour * 60 + Number(match[2] || 0);
+  const laterMeridiem = value.slice(match.index + match[0].length).match(/\d\s*([ap])\.?m\b/i);
+  const meridiem = (match[3] || (laterMeridiem && laterMeridiem[1]) || (hour <= 6 ? 'p' : 'a')).toLowerCase();
+  return (hour % 12) * 60 + Number(match[2] || 0) + (meridiem === 'p' ? 12 * 60 : 0);
+}
+
+function eventTime(ticket) {
+  if (ticket.startTime && ticket.endTime) return `${ticket.startTime} – ${ticket.endTime}`;
+  if (ticket.startTime) return ticket.startTime;
+  if (ticket.endTime) return `until ${ticket.endTime}`;
+  return 'Time not set';
+}
+
+function weekEvent(ticket) {
+  const classes = ['week-event', ticket.closed ? 'closed' : `status-${ticket.statusIndex}`];
+  if (ticket.unassigned) classes.push('unassigned');
+  const assignees = ticket.assignee ? [ticket.assignee, ...(ticket.additionalAssignees || [])].join(' + ') : 'Unassigned';
+  const recurring = (ticket.recurringDates || []).length ? '<span class="week-tag">&#8635; Recurring</span>' : '';
+  return (
+    `<div class="${classes.join(' ')}">` +
+    (ticket.closed ? '' : ticketMarkers(ticket)) +
+    `<div class="week-time">${escapeHtml(eventTime(ticket))}</div>` +
+    `<div class="week-title">${escapeHtml(ticket.subject)}</div>` +
+    (ticket.location ? `<div class="week-row">&#128205; <b>${escapeHtml(ticket.location)}</b></div>` : '') +
+    `<div class="week-row week-who">&#128100; ${escapeHtml(assignees)}</div>` +
+    `<div class="week-row">${recurring}#${escapeHtml(ticket.id)}${ticket.requester ? ` · ${escapeHtml(ticket.requester)}` : ''}</div>` +
+    '</div>'
+  );
+}
+
+function renderWeek(sideData) {
+  const grid = document.getElementById('week');
+  if (!grid) return;
+  const ok = sideData && sideData.ok !== false;
+  const tickets = ok ? sideData.tickets || [] : [];
+
+  const today = startOfDay(new Date());
+  const signature = dayKey(today) + JSON.stringify(sideData);
+  if (signature === weekSignature) return;
+  weekSignature = signature;
+
+  const weekStart = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay());
+  const days = Array.from({ length: 7 }, (_, i) => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i));
+  const byDay = new Map(days.map((day) => [dayKey(day), []]));
+  const inWeek = new Set();
+  for (const ticket of tickets) {
+    for (const date of ticketDays(ticket)) {
+      const list = byDay.get(dayKey(date));
+      if (!list) continue;
+      list.push(ticket);
+      inWeek.add(ticket);
+    }
+  }
+
+  const short = (date) => date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  setText('week-count', ok ? `(${[...inWeek].filter((t) => !t.closed).length})` : '');
+  setText('week-range', `${short(days[0])} – ${short(days[6])}`);
+
+  grid.innerHTML = days
+    .map((day) => {
+      const events = byDay
+        .get(dayKey(day))
+        .sort((a, b) => startMinutes(a.startTime) - startMinutes(b.startTime) || a.id - b.id);
+      const unassigned = events.filter((t) => t.unassigned && !t.closed).length;
+      const isToday = day.getTime() === today.getTime();
+      const classes = ['week-day'];
+      if (day < today) classes.push('past');
+      if (isToday) classes.push('today');
+      return (
+        `<div class="${classes.join(' ')}">` +
+        '<div class="week-day-head">' +
+        `<span class="week-day-name">${isToday ? 'Today' : day.toLocaleDateString('en-US', { weekday: 'short' })}</span>` +
+        (unassigned ? `<span class="week-unassigned">&#9888; ${unassigned} unassigned</span>` : '') +
+        `<span class="week-day-date">${short(day)}</span>` +
+        '</div>' +
+        `<div class="week-events">${events.length ? events.map(weekEvent).join('') : '<div class="week-empty">No events</div>'}</div>` +
+        '</div>'
+      );
+    })
+    .join('');
+
+  grid.querySelectorAll('.week-events').forEach((column) => {
+    startAutoScroll(column, WEEK_SCROLL_PX_PER_SEC, () => weekSignature === signature);
+  });
+  setStatus('week-status', sideData);
+}
+
 function renderTickets(data) {
   const ok = data && data.ok !== false;
-  // If the whole connector failed, show its error on both sides.
+  // If the whole connector failed, show its error on every panel.
   renderTicketSide('it', ok ? data.it : data, ok ? data.statuses : []);
+  renderWeek(ok ? data.av : data);
   renderAvCalendar(ok ? data.av : data);
 }
 
+// Sizes change on resize: re-fit the month cells and re-check which week
+// columns need to scroll.
 window.addEventListener('resize', () => {
   if (!avCalendarData) return;
   avCalendarSignature = null;
+  weekSignature = null;
+  renderWeek(avCalendarData);
   renderAvCalendar(avCalendarData);
 });
 
@@ -300,7 +406,6 @@ async function refresh() {
     const res = await fetch('/api/stats');
     const data = await res.json();
 
-    renderNinjaOne(data.ninjaone);
     renderTickets(data.tickets);
 
     const lastUpdated = document.getElementById('last-updated');
