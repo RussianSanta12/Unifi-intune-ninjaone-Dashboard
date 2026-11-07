@@ -58,6 +58,21 @@ OAuth 2.0, **Client Credentials flow** (machine-to-machine, no user login needed
   - Both also clear when a **technician** changes the status at or after the comment (same save counts). Status changes by requesters or automation are ignored, because NinjaOne reopens tickets automatically on email replies (e.g. Closed → In Progress), which would otherwise hide the marker. No time-based expiry.
   - Costs 2 extra calls per shown ticket per poll (`GET /v2/ticketing/ticket/{id}` and `/log-entry`), plus one `GET /v2/user/technicians` for assignee names.
 
+**AV monthly calendar** (replaces the AV list; the IT panel stays a list):
+- Sun–Sat grid of the current month, padded with the neighboring months' days to fill the first and last weeks (those days show their tickets too, slightly dimmed). Each ticket sits on its "Date of Event / Program" day; tickets with no date or outside the grid aren't shown.
+- Per day: as many ticket cards as fit the cell, then "+N more" (to be revisited when a larger weekly calendar is added above). Unassigned first, then by status; closed last.
+- Cards: New / In Progress keep the colored stripe; **Added to Calendar** fills green; **Closed** fills brown. Unassigned cards show "Unassigned" in red, and the day gets a red "⚠ N unassigned" bar at the top. Comment markers sit in the card's top-right corner.
+- Past days are dimmed (darker box, cards slightly faded so closed brown stays visible); today has a gold outline.
+- Key across the top: "⚠ N Unassigned" (red when N > 0, counting open tickets on the grid), Added to Calendar, Public comment, Private note.
+- **Recurring events:** if the ticket's "Reocurring Event" checkbox is ticked, it also shows on every day in "Reocurring Days" (`month:day` list, e.g. `11:4, 11:16, 12:13`; bad entries are skipped). No year is given, so each day takes the year closest to the ticket's event date. The fields don't have to be board columns — open tickets fall back to their ticket details — but closed tickets only see them if they are. Counts in the key/header are per ticket; per-day alerts and the next-month footer count each day.
+- Footer: "<next month>: N events added to calendar" — Added to Calendar event days across all of next month.
+- Closed tickets (`NINJAONE_AV_CLOSED_STATUS`, default "Closed") are AV-only and kept only when their event is within a week of the current month; they skip the per-ticket detail/log calls. If the AV board itself filters out closed tickets in NinjaOne, none will appear.
+
+**Later — auto-close past AV events (not built).** Idea: each poll, close AV tickets in Added to Calendar whose event date is before today, with a private "Auto-closed by dashboard" note. Remember each close as (ticket, event date) so a ticket someone reopens isn't re-closed unless its date changes and passes again; re-read the ticket just before closing. Open questions before building:
+- Needs a NinjaOne app with **Management** scope (writes) — preferably a separate client app so the dashboard's read-only key stays read-only.
+- Closing may email requesters depending on NinjaOne notification rules — check first.
+- Ship behind `NINJAONE_AV_AUTO_CLOSE=off|dry-run|on`, starting in dry-run.
+
 ### Intune (via Microsoft Graph API)
 Azure AD app registration + client secret (app-only auth):
 - Azure Portal → App registrations → new app → Certificates & secrets → New client secret (expires ≤ 12 months, needs manual renewal — note the expiry).

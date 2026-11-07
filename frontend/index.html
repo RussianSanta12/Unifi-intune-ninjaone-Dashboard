@@ -44,9 +44,14 @@
       <div class="panel panel-issues" id="panel-tickets-av">
         <div class="panel-heading">
           <h3>AV Support Requests <span class="ticket-count" id="tickets-av-count"></span></h3>
-          <div class="legend" id="tickets-av-legend"></div>
+          <span class="month-label" id="tickets-av-month"></span>
         </div>
-        <ul class="issue-list" id="tickets-av"></ul>
+        <div class="legend cal-legend" id="tickets-av-legend"></div>
+        <div class="cal-weekdays">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div class="cal-grid" id="tickets-av"></div>
+        <div class="cal-next-month" id="tickets-av-next"></div>
         <div class="panel-footer" id="tickets-av-status"></div>
       </div>
     </section>

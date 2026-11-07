@@ -1,6 +1,6 @@
 # Stats Dashboard
 
-Locally hosted dashboard showing NinjaOne device health counts and open IT / AV support requests from NinjaOne Ticketing, sized for 16:9 displays.
+Locally hosted dashboard showing NinjaOne device health counts and open IT support requests and an AV support-request monthly calendar from NinjaOne Ticketing, sized for 16:9 displays.
 
 > **Scope:** UniFi and Intune are paused for now. Their connector files are still in `backend/connectors/`, but the backend doesn't poll them and the page doesn't show them. See PLAN.md.
 
