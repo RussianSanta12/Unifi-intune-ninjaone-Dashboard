@@ -38,6 +38,10 @@ const AV_FIELDS = {
   recurring: process.env.NINJAONE_AV_RECURRING_FIELD || 'Reoccurring Event',
   recurringDays: process.env.NINJAONE_AV_RECURRING_DAYS_FIELD || 'Reoccurring Days',
 };
+// IT form fields shown on the IT list.
+const IT_FIELDS = {
+  location: process.env.NINJAONE_IT_LOCATION_FIELD || 'Location(IT)',
+};
 
 const PAGE_SIZE = 200;
 const DETAIL_CONCURRENCY = 5; // parallel per-ticket lookups
@@ -187,9 +191,10 @@ async function runBoard(boardId) {
   return { rows, attributes };
 }
 
-// `av` turns on the AV extras: event date, closed tickets, the weekly
-// calendar's fields and recurring days.
-async function loadBoard(boards, technicianNames, boardName, { av = false, allAttributes = [] } = {}) {
+// `fieldNames` ({ key: field name }) are the form fields to send for each
+// ticket. `av` turns on the AV extras: event date, closed tickets, the weekly
+// calendar's times and recurring days.
+async function loadBoard(boards, technicianNames, boardName, { av = false, fieldNames = {}, allAttributes = [] } = {}) {
   const board = boards.find((b) => b.name === boardName);
   if (!board) {
     return { ok: false, error: `No NinjaOne board named "${boardName}" (check .env)` };
@@ -198,19 +203,18 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, allAt
   const { rows, attributes } = await runBoard(board.id);
 
   let eventDateId = null;
-  let fields = null;
   if (av) {
     eventDateId = Object.keys(attributes).find((id) => attributes[id].name === AV_EVENT_DATE_FIELD);
     if (!eventDateId) {
       return { ok: false, error: `Board "${boardName}" has no "${AV_EVENT_DATE_FIELD}" column (check .env)` };
     }
-    const lookup = fieldLookup(attributes, allAttributes);
-    fields = Object.fromEntries(Object.entries(AV_FIELDS).map(([key, name]) => [key, lookup(name)]));
-    for (const [key, field] of Object.entries(fields)) {
-      if (!field && !warnedMissingFields.has(key)) {
-        warnedMissingFields.add(key);
-        console.warn(`[tickets] No ticket field named "${AV_FIELDS[key]}" (check .env); it won't be shown`);
-      }
+  }
+  const lookup = fieldLookup(attributes, allAttributes);
+  const fields = Object.fromEntries(Object.entries(fieldNames).map(([key, name]) => [key, lookup(name)]));
+  for (const [key, field] of Object.entries(fields)) {
+    if (!field && !warnedMissingFields.has(fieldNames[key])) {
+      warnedMissingFields.add(fieldNames[key]);
+      console.warn(`[tickets] No ticket field named "${fieldNames[key]}" (check .env); it won't be shown`);
     }
   }
 
@@ -244,6 +248,7 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, allAt
         assignee: row.assignedAppUser || null,
         // Within a status: soonest event first (AV), otherwise oldest ticket first.
         sortKey: row.createTime * 1000,
+        boardValues: row.attributeValues || [],
       };
       if (closed) ticket.closed = true;
       if (av) {
@@ -251,7 +256,6 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, allAt
         ticket.eventDate = value ? new Date(value).toISOString() : null;
         ticket.sortKey = value || Infinity; // no date sorts last
         ticket.requester = row.requester || null;
-        ticket.boardValues = row.attributeValues || [];
       }
       return ticket;
     })
@@ -265,18 +269,18 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, allAt
   );
   tickets.forEach((t, i) => {
     Object.assign(t, details[i].extras);
+    t.detailValues = details[i].attributeValues;
+    const text = (field) => (field ? field.text(read(t, field)) : null);
+    t.location = text(fields.location);
     if (av) {
-      t.detailValues = details[i].attributeValues;
-      const text = (field) => (field ? field.text(read(t, field)) : null);
       t.startTime = text(fields.startTime);
       t.endTime = text(fields.endTime);
-      t.location = text(fields.location);
       // Extra days besides the event date itself.
       const eventMs = t.eventDate ? Date.parse(t.eventDate) : null;
       t.recurringDates = (recurringMs(t) || []).filter((ms) => ms !== eventMs).map((ms) => new Date(ms).toISOString());
-      delete t.boardValues;
-      delete t.detailValues;
     }
+    delete t.boardValues;
+    delete t.detailValues;
     delete t.sortKey;
   });
   return { ok: true, count: tickets.filter((t) => !t.closed).length, tickets };
@@ -296,9 +300,10 @@ async function getStats() {
   const technicianNames = new Map(
     technicians.map((t) => [t.id, [t.firstName, t.lastName].filter(Boolean).join(' ') || t.email])
   );
+  const attributeList = Array.isArray(allAttributes) ? allAttributes : [];
   const [it, av] = await Promise.all([
-    loadBoard(boards, technicianNames, IT_BOARD),
-    loadBoard(boards, technicianNames, AV_BOARD, { av: true, allAttributes: Array.isArray(allAttributes) ? allAttributes : [] }),
+    loadBoard(boards, technicianNames, IT_BOARD, { fieldNames: IT_FIELDS, allAttributes: attributeList }),
+    loadBoard(boards, technicianNames, AV_BOARD, { av: true, fieldNames: AV_FIELDS, allAttributes: attributeList }),
   ]);
   return { ok: true, statuses: STATUSES, it, av };
 }

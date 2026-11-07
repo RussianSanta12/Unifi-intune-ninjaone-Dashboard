@@ -108,12 +108,16 @@ function ticketMarkers(ticket) {
   return markers.length ? `<span class="markers">${markers.join('')}</span>` : '';
 }
 
+// Title and assignees on the left; the ticket's location on the right.
 function ticketLabel(ticket) {
   const assignees = ticket.assignee ? [ticket.assignee, ...(ticket.additionalAssignees || [])].join(' + ') : 'Unassigned';
   return (
     ticketMarkers(ticket) +
+    '<div class="issue-main">' +
     `<span class="issue-title"><span class="ticket-id">#${escapeHtml(ticket.id)}</span>${escapeHtml(ticket.subject)}</span>` +
-    escapeHtml(assignees)
+    escapeHtml(assignees) +
+    '</div>' +
+    (ticket.location ? `<span class="issue-location">${escapeHtml(ticket.location)}</span>` : '')
   );
 }
 

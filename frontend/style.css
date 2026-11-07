@@ -422,6 +422,29 @@ html, body {
 .issue-list li {
   position: relative;
   border-left: 0.5vw solid var(--dot);
+  display: flex;
+  align-items: center;
+  gap: 1vw;
+}
+
+.issue-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The ticket's location, on the right of the row. */
+.issue-location {
+  flex: 0 1 auto;
+  max-width: 45%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: 1.2vh;
+}
+
+.issue-list li.unassigned .issue-location {
+  color: var(--on-fill);
 }
 
 /* Unassigned: the whole row fills with its status color. */
