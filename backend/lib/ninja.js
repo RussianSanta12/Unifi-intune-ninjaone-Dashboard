@@ -77,14 +77,15 @@ async function fetchAccessToken() {
 function makeClient(getToken) {
   async function request(method, path, body) {
     const token = await getToken();
+    const isForm = body instanceof FormData; // comments are multipart; fetch sets the boundary
     const res = await fetch(`${INSTANCE_URL}${path}`, {
       method,
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
-        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(body && !isForm ? { 'Content-Type': 'application/json' } : {}),
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? (isForm ? body : JSON.stringify(body)) : undefined,
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
@@ -106,6 +107,16 @@ function makeClient(getToken) {
     get: (path) => request('GET', path),
     post: (path, body) => request('POST', path, body),
     put: (path, body) => request('PUT', path, body),
+    // POST /v2/ticketing/ticket/{id}/comment takes multipart/form-data with
+    // the comment as a JSON part named "comment".
+    comment: (ticketId, { body, isPublic = false }) => {
+      const form = new FormData();
+      const htmlBody = `<p>${String(body)
+        .replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
+        .replace(/\n/g, '<br>')}</p>`;
+      form.append('comment', new Blob([JSON.stringify({ public: isPublic, body, htmlBody })], { type: 'application/json' }));
+      return request('POST', `/v2/ticketing/ticket/${ticketId}/comment`, form);
+    },
   };
 }
 

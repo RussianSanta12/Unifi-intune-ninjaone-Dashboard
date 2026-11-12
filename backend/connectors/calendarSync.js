@@ -1,98 +1,79 @@
-// AV ticket → events calendar sync. Runs on the aggregator's timer.
+// AV ticket → events calendar: check, approve, then add. Runs on the
+// aggregator's timer. The rules live in ../lib/calendarCheck.js; this file
+// does the reading and writing.
 //
-// For every AV Support Request still in "New":
-//   1. read its event date, free-text start/end times (../lib/eventTime) and,
-//      if "Reoccurring Event" is ticked, the extra days in "Reoccurring Days"
-//      (../lib/recurringDays);
-//   2. put each of those days from today on onto the shared events calendar
-//      (Microsoft Graph) as its own event, starting at the setup time when
-//      one is given. Past days are skipped; a ticket with no days left is
-//      left alone;
-//   3. set the ticket to "Added to Calendar" and assign it by the main event
-//      date's weekday: Mon–Wed and Thu–Sun each go to one technician (.env).
-//      If a recurring day falls in the other half of the week, that
-//      technician is added as an additional assignee.
-// Tickets whose times or recurring days can't be read stay in "New", get the
-// "needs info" marker on the dashboard, and are retried every
-// CALENDAR_SYNC_RETRY_HOURS.
+// AV tickets in CALENDAR_SYNC_CHECK_STATUSES (New, In Progress) are checked
+// for everything the calendar needs: event date, start/end times with am/pm,
+// location, valid recurring days if "Reoccurring Event" is ticked, and at
+// least one day from today on.
+//   - All there: the sync posts a private "[Calendar check] Approved to be
+//     added to calendar" note and assigns the ticket by the main event date's
+//     weekday (Mon–Wed / Thu–Sun technicians in .env; whoever covers another
+//     recurring day is added as an additional assignee).
+//   - Anything missing: it posts a private "Missing info" form listing each
+//     problem and the format it needs, and the ticket gets the dashboard's
+//     "needs info" marker. Staff fix it in the side panel, or reply with
+//     "Field: value" lines, which the sync copies into the ticket's fields.
+//     Either way the ticket is checked again and, once it passes, approved.
+// When staff set a ticket to CALENDAR_SYNC_ADD_STATUS ("Added to Calendar"),
+// it is checked once more; if it passes (re-approving it if it changed since
+// the approval) each day goes on the calendar as its own event and an
+// "Added to the events calendar" note is posted. Tickets the sync never
+// commented on (made before it ran) are left alone, as are ones it already
+// added: later edits are up to staff (see PLAN.md, "revisit later").
 //
-// Once a ticket is "Added to Calendar" the sync never looks at it again, so
-// later edits (new days, changed times) are up to staff — see PLAN.md.
+// All state lives in those notes ("Ref:" line, see lib/calendarCheck.js), so
+// a restart loses nothing and every step is visible in NinjaOne.
 //
 // CALENDAR_SYNC_DRY_RUN (default true) logs what would happen without
-// touching the calendar or tickets, and needs only the read-only credentials.
+// writing anything, and needs only the read-only credentials.
 //
-// Safe to re-run after a failure: each event carries its ticket ID and day,
-// so a ticket whose update failed finds its existing events next time
-// instead of creating second ones. After each update the ticket is read
-// back; if its custom fields didn't survive, the sync stops until restarted.
+// Safety: events are tagged with ticket ID + day, so retries never
+// double-book; every ticket update is read back, and every note is checked to
+// be readable afterwards (else the sync would post it again each poll) — on
+// any surprise the sync stops until the backend is restarted.
 
-const fs = require('fs');
-const path = require('path');
 const ninja = require('../lib/ninja');
 const ninjaWebAuth = require('../lib/ninjaWebAuth');
 const graph = require('../lib/graph');
-const { eventWindow, dayKey } = require('../lib/eventTime');
-const { isChecked, parseRecurringDays } = require('../lib/recurringDays');
+const { isChecked } = require('../lib/recurringDays');
+const { isCheckComment, entryText, readCheckComment, makeChecker } = require('../lib/calendarCheck');
 
 const AV_BOARD = process.env.NINJAONE_AV_BOARD || 'AV Support Requests';
-const DATE_FIELD = process.env.NINJAONE_AV_EVENT_DATE_FIELD || 'Date of Event / Program';
-const START_FIELD = process.env.NINJAONE_AV_START_TIME_FIELD || 'Event Start Time';
-const END_FIELD = process.env.NINJAONE_AV_END_TIME_FIELD || 'End Time';
-const LOCATION_FIELD = process.env.NINJAONE_AV_LOCATION_FIELD || 'Location(IT)';
-const RECURRING_FIELD = process.env.NINJAONE_AV_RECURRING_FIELD || 'Reoccurring Event';
-const RECURRING_DAYS_FIELD = process.env.NINJAONE_AV_RECURRING_DAYS_FIELD || 'Reoccurring Days';
-const FROM_STATUS = process.env.CALENDAR_SYNC_FROM_STATUS || 'New';
-const TO_STATUS = process.env.CALENDAR_SYNC_TO_STATUS || 'Added to Calendar';
+const FIELD_NAMES = {
+  date: process.env.NINJAONE_AV_EVENT_DATE_FIELD || 'Date of Event / Program',
+  start: process.env.NINJAONE_AV_START_TIME_FIELD || 'Event Start Time',
+  end: process.env.NINJAONE_AV_END_TIME_FIELD || 'End Time',
+  location: process.env.NINJAONE_AV_LOCATION_FIELD || 'Location(IT)',
+  recurring: process.env.NINJAONE_AV_RECURRING_FIELD || 'Reoccurring Event',
+  recurringDays: process.env.NINJAONE_AV_RECURRING_DAYS_FIELD || 'Reoccurring Days',
+};
+const CHECK_STATUSES = (process.env.CALENDAR_SYNC_CHECK_STATUSES || 'New,In Progress').split(',').map((s) => s.trim());
+const ADD_STATUS = process.env.CALENDAR_SYNC_ADD_STATUS || 'Added to Calendar';
 const ASSIGNEE_MON_WED = Number(process.env.CALENDAR_SYNC_ASSIGNEE_MON_WED) || null; // NinjaOne technician ID
 const ASSIGNEE_THU_SUN = Number(process.env.CALENDAR_SYNC_ASSIGNEE_THU_SUN) || null;
 const MAILBOX = process.env.CALENDAR_MAILBOX;
 const TIME_ZONE = process.env.CALENDAR_TIME_ZONE || 'America/New_York';
-const RETRY_MS = (Number(process.env.CALENDAR_SYNC_RETRY_HOURS) || 24) * 3_600_000;
 const DRY_RUN = process.env.CALENDAR_SYNC_DRY_RUN !== 'false';
 const INSTANCE_URL = process.env.NINJAONE_INSTANCE_URL;
 
 // Custom property stamped on each event ("<ticket id>:<YYYY-MM-DD>") so it
 // can be found again by ticket and day.
 const TICKET_PROP = 'String {6f1c2d8e-3b7a-4c55-9e0f-a1d4b2c39e71} Name NinjaOneTicketDay';
-const SYNCED_KEEP_MS = 60 * 24 * 3_600_000; // forget synced tickets after 60 days
-
-const STATE_FILE = path.join(__dirname, '..', 'data', 'calendar-sync.json');
-// needsInfo: ticketId -> { reason, since, nextAttemptAt }
-// synced:    ticketId -> { at, eventIds }   (at = when the sync changed its status)
-const state = loadState();
+// Never post more than one note per ticket in this window, whatever happens.
+const MIN_NOTE_INTERVAL_MS = 2 * 60_000;
 
 let running = false;
-let halted = null; // set when an update damaged a ticket; stops all writes
+let halted = null; // set on any surprise after a write; stops all writes
 let lastResult = { ok: false, error: 'Not yet run' };
-const announced = new Map(); // ticketId -> last dry-run plan / skip logged, to keep the log quiet
+let needsInfo = new Set(); // ticket IDs whose check failed on the last run
+const settled = new Map(); // ticketId -> status it was settled in (added / never checked), to skip re-reading
+const lastNoteAt = new Map(); // ticketId -> ms
+const announced = new Map(); // ticketId -> last dry-run line logged, to keep the log quiet
 
-function loadState() {
-  try {
-    const saved = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
-    return { needsInfo: saved.needsInfo || {}, synced: saved.synced || {} };
-  } catch {
-    return { needsInfo: {}, synced: {} };
-  }
-}
-
-function saveState() {
-  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  const tmp = `${STATE_FILE}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  fs.renameSync(tmp, STATE_FILE);
-}
-
-// For the ticket panels: tickets showing the "needs info" marker, and when
-// the sync changed a ticket's status (so that change doesn't clear its
-// comment markers).
+// For the ticket panels: tickets showing the "needs info" marker.
 function needsInfoIds() {
-  return new Set(Object.keys(state.needsInfo).map(Number));
-}
-
-function syncedAt(ticketId) {
-  const entry = state.synced[ticketId];
-  return entry ? entry.at : null;
+  return needsInfo;
 }
 
 function assigneeFor(weekday) {
@@ -103,9 +84,6 @@ function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
-const formatDay = (ms) => new Date(ms).toLocaleDateString('en-US', { timeZone: TIME_ZONE, weekday: 'short', month: 'short', day: 'numeric' });
-const formatWhen = (ms) => new Date(ms).toLocaleString('en-US', { timeZone: TIME_ZONE, dateStyle: 'medium', timeStyle: 'short' });
-
 function displayValue(attr, value) {
   if (value === null || value === undefined || value === '') return null;
   switch (attr.attributeType) {
@@ -114,7 +92,7 @@ function displayValue(attr, value) {
       return option ? option.name : String(value);
     }
     case 'CHECKBOX':
-      return value ? 'Yes' : 'No';
+      return isChecked(value) ? 'Yes' : 'No';
     case 'DATE':
       return new Date(value).toLocaleDateString('en-US', { timeZone: TIME_ZONE, dateStyle: 'full' });
     default:
@@ -122,34 +100,24 @@ function displayValue(attr, value) {
   }
 }
 
-// The ticket's custom fields as [{ name, raw, text }], in form order.
-function ticketFields(detail, attrsById) {
-  return (detail.attributeValues || [])
-    .map((v) => {
-      const attr = attrsById.get(v.attributeId);
-      return attr ? { name: attr.name, raw: v.value, text: displayValue(attr, v.value) } : null;
-    })
-    .filter(Boolean);
-}
-
-// One event per day; `days` is every day being scheduled, for the body.
-function buildEvent(detail, fields, window, days, assigneeNames) {
-  const field = (name) => fields.find((f) => f.name === name);
-  const location = field(LOCATION_FIELD);
+function buildEvent(detail, ctx, window, check, assigneeNames) {
   const ticketUrl = `${INSTANCE_URL}/#/ticketing/ticket/${detail.id}`;
-  const rows = fields
-    .filter((f) => f.text !== null)
-    .map((f) => `<tr><td><b>${escapeHtml(f.name)}</b></td><td>${escapeHtml(f.text)}</td></tr>`)
+  const rows = (detail.attributeValues || [])
+    .map((v) => {
+      const attr = ctx.attrsById.get(v.attributeId);
+      const text = attr ? displayValue(attr, v.value) : null;
+      return text === null ? '' : `<tr><td><b>${escapeHtml(attr.name)}</b></td><td>${escapeHtml(text)}</td></tr>`;
+    })
     .join('');
   const series =
-    days.length > 1
-      ? `<p>Recurring event — day ${days.indexOf(window) + 1} of ${days.length}: ${days.map((d) => escapeHtml(formatDay(d.start))).join(', ')}</p>`
+    check.days.length > 1
+      ? `<p>Recurring event — day ${check.days.indexOf(window) + 1} of ${check.days.length}: ${check.days.map((d) => escapeHtml(ctx.checker.dayText(d))).join('; ')}</p>`
       : '';
   return {
     subject: detail.subject,
     start: { dateTime: window.start.toISOString().replace('Z', ''), timeZone: 'UTC' },
     end: { dateTime: window.end.toISOString().replace('Z', ''), timeZone: 'UTC' },
-    location: location && location.text ? { displayName: location.text } : undefined,
+    location: { displayName: check.location },
     body: {
       contentType: 'HTML',
       content:
@@ -170,9 +138,27 @@ async function findEvent(ticketId, day) {
   return (res.value || [])[0] || null;
 }
 
-// UpdateTicket requires the full ticket plus its current version; sending
-// the custom fields back unchanged keeps the update from clearing them.
-function updateBody(detail, statusId, assigneeId, additionalIds) {
+// The ticket's event fields by role, from its details.
+function currentValues(detail, ctx) {
+  const values = {};
+  for (const [role, attr] of Object.entries(ctx.attrsByRole)) {
+    const entry = attr && (detail.attributeValues || []).find((v) => v.attributeId === attr.id);
+    values[role] = entry ? entry.value : null;
+  }
+  return values;
+}
+
+// UpdateTicket requires the full ticket plus its current version; custom
+// fields are sent back unchanged except for `fieldUpdates` ({ attributeId: value }).
+function updateBody(detail, { fieldUpdates = {}, assigneeId, additionalIds }) {
+  const attributes = (detail.attributeValues || []).map(({ id, attributeId, value }) => ({
+    id,
+    attributeId,
+    value: attributeId in fieldUpdates ? fieldUpdates[attributeId] : value,
+  }));
+  for (const [attributeId, value] of Object.entries(fieldUpdates)) {
+    if (!attributes.some((a) => String(a.attributeId) === attributeId)) attributes.push({ attributeId: Number(attributeId), value });
+  }
   return {
     version: detail.version,
     clientId: detail.clientId,
@@ -180,36 +166,67 @@ function updateBody(detail, statusId, assigneeId, additionalIds) {
     locationId: detail.locationId,
     nodeId: detail.nodeId,
     subject: detail.subject,
-    status: String(statusId),
+    status: String(detail.status.statusId),
     type: detail.type,
     cc: detail.ccList,
-    assignedAppUserId: assigneeId,
+    assignedAppUserId: assigneeId !== undefined ? assigneeId : detail.assignedAppUserId,
     requesterUid: detail.requesterUid,
     severity: detail.severity,
     priority: detail.priority,
     parentTicketId: detail.parentTicketId,
     tags: detail.tags,
-    attributes: (detail.attributeValues || []).map(({ id, attributeId, value }) => ({ id, attributeId, value })),
-    additionalAssignedTechnicianIds: additionalIds,
+    attributes,
+    additionalAssignedTechnicianIds: additionalIds !== undefined ? additionalIds : detail.additionalAssignedTechnicianIds,
     followupTime: detail.followupTime,
   };
 }
 
-// Read the ticket back: status and assignees changed, custom fields intact.
-async function verifyUpdate(before, statusId, assigneeId, additionalIds) {
-  const after = await ninja.get(`/v2/ticketing/ticket/${before.id}`);
+// Write and read back: the intended changes landed, nothing else moved.
+async function updateTicket(detail, changes) {
+  await ninja.write.put(`/v2/ticketing/ticket/${detail.id}`, updateBody(detail, changes));
+  const after = await ninja.get(`/v2/ticketing/ticket/${detail.id}`);
   const problems = [];
-  if (!after.status || after.status.statusId !== statusId) problems.push('status did not change');
-  if (after.assignedAppUserId !== assigneeId) problems.push('assignee did not change');
+  const fieldUpdates = changes.fieldUpdates || {};
+  if (!after.status || after.status.statusId !== detail.status.statusId) problems.push('status changed');
+  if (changes.assigneeId !== undefined && after.assignedAppUserId !== changes.assigneeId) problems.push('assignee did not change');
   const afterAdditional = new Set(after.additionalAssignedTechnicianIds || []);
-  if (additionalIds.some((tid) => !afterAdditional.has(tid))) problems.push('additional assignees did not change');
-  const afterValues = new Map((after.attributeValues || []).map((v) => [v.attributeId, v.value]));
-  for (const v of before.attributeValues || []) {
-    if (v.value !== null && String(afterValues.get(v.attributeId)) !== String(v.value)) {
-      problems.push(`custom field ${v.attributeId} changed from ${JSON.stringify(v.value)} to ${JSON.stringify(afterValues.get(v.attributeId))}`);
-    }
+  if ((changes.additionalIds || []).some((tid) => !afterAdditional.has(tid))) problems.push('additional assignees did not change');
+  const afterValues = new Map((after.attributeValues || []).map((v) => [String(v.attributeId), v.value]));
+  for (const v of detail.attributeValues || []) {
+    const id = String(v.attributeId);
+    if (id in fieldUpdates || v.value === null) continue;
+    if (String(afterValues.get(id)) !== String(v.value)) problems.push(`field ${id} changed from ${JSON.stringify(v.value)} to ${JSON.stringify(afterValues.get(id))}`);
   }
-  return problems;
+  for (const [id, value] of Object.entries(fieldUpdates)) {
+    if (String(afterValues.get(id)) !== String(value)) problems.push(`field ${id} was not set to ${JSON.stringify(value)}`);
+  }
+  if (problems.length) {
+    halted = `Calendar sync stopped after updating ticket #${detail.id}: ${problems.join('; ')}. Check the ticket in NinjaOne, then restart the backend.`;
+    throw new Error(halted);
+  }
+  return after;
+}
+
+// Post a private note, then make sure the sync can read it back — otherwise
+// it would post the same note again on every poll.
+async function postNote(ticketId, body) {
+  const last = lastNoteAt.get(ticketId);
+  if (last && Date.now() - last < MIN_NOTE_INTERVAL_MS) {
+    throw new Error(`#${ticketId}: already posted a note in the last ${MIN_NOTE_INTERVAL_MS / 60_000} minutes — skipping`);
+  }
+  lastNoteAt.set(ticketId, Date.now());
+  await ninja.write.comment(ticketId, { body, isPublic: false });
+  const ref = body.match(/Ref: \S+/)[0];
+  let found = false;
+  for (let attempt = 0; attempt < 3 && !found; attempt++) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 2000)); // give the log a moment
+    const log = await ninja.get(`/v2/ticketing/ticket/${ticketId}/log-entry`);
+    found = (Array.isArray(log) ? log : []).some((e) => e.type === 'COMMENT' && readCheckComment(e) && entryText(e).includes(ref));
+  }
+  if (!found) {
+    halted = `Calendar sync stopped: its note on ticket #${ticketId} can't be read back (looked for "${ref}"). Check the ticket's notes, then restart the backend.`;
+    throw new Error(halted);
+  }
 }
 
 function configError() {
@@ -227,181 +244,176 @@ function configError() {
   return null;
 }
 
-// Every day to schedule, as eventWindow results, or { problem } when the
-// times or recurring days can't be read.
-function eventDays(fields) {
-  const raw = (name) => {
-    const f = fields.find((x) => x.name === name);
-    return f ? f.raw : null;
-  };
-  const times = { startText: raw(START_FIELD), endText: raw(END_FIELD), timeZone: TIME_ZONE };
-  const dateMs = Number(raw(DATE_FIELD)) || NaN;
-  const main = eventWindow({ dateMs, ...times });
-  if (!main.ok) return { problem: main.reason };
-
-  let extra = [];
-  if (isChecked(raw(RECURRING_FIELD))) {
-    const parsed = parseRecurringDays(raw(RECURRING_DAYS_FIELD), dateMs);
-    if (parsed.bad.length) {
-      return { problem: `Can't read recurring day(s) ${parsed.bad.map((b) => `"${b}"`).join(', ')} — use month:day, e.g. "11:4, 11:16"` };
-    }
-    if (!parsed.days.length) return { problem: `"${RECURRING_FIELD}" is ticked but "${RECURRING_DAYS_FIELD}" is empty` };
-    extra = parsed.days.map((ms) => eventWindow({ dateMs: ms, ...times }));
-  }
-
-  const byDay = new Map();
-  for (const w of [main, ...extra]) byDay.set(w.day, w);
-  return { main, days: [...byDay.values()].sort((a, b) => a.start - b.start) };
+function announce(id, line) {
+  if (announced.get(id) === line) return;
+  announced.set(id, line);
+  console.log(`[calendarSync] ${DRY_RUN ? 'DRY RUN ' : ''}${line}`);
 }
 
-async function syncTicket(row, ctx, result) {
+async function processTicket(row, ctx, result) {
   const id = row.id;
-  const waiting = state.needsInfo[id];
-  if (waiting && Date.now() < waiting.nextAttemptAt) return;
+  const status = row.status && row.status.displayName;
+  const isAdd = status === ADD_STATUS;
+  if (settled.get(id) === status) return;
 
-  const detail = await ninja.get(`/v2/ticketing/ticket/${id}`);
-  const fields = ticketFields(detail, ctx.attrsById);
-  const parsed = eventDays(fields);
+  const [detail, rawLog] = await Promise.all([
+    ninja.get(`/v2/ticketing/ticket/${id}`),
+    ninja.get(`/v2/ticketing/ticket/${id}/log-entry`),
+  ]);
+  const comments = (Array.isArray(rawLog) ? rawLog : [])
+    .filter((e) => e.type === 'COMMENT' && !e.system)
+    .sort((a, b) => a.createTime - b.createTime);
+  const checks = comments.map(readCheckComment).filter(Boolean);
+  const last = checks[checks.length - 1] || null;
 
-  if (parsed.problem) {
-    state.needsInfo[id] = { reason: parsed.problem, since: waiting ? waiting.since : Date.now(), nextAttemptAt: Date.now() + RETRY_MS };
-    ctx.changed = true;
-    console.log(`[calendarSync] #${id} needs info: ${parsed.problem} (retrying in ${RETRY_MS / 3_600_000}h)`);
+  if (isAdd && (!last || last.kind === 'added')) {
+    settled.set(id, status); // never checked (before the sync's time), or already added
     return;
   }
-  if (waiting) {
-    delete state.needsInfo[id];
-    ctx.changed = true;
-  }
 
-  const today = dayKey(Date.now(), TIME_ZONE);
-  const days = parsed.days.filter((w) => w.day >= today);
-  if (!days.length) {
-    result.skipped.push({ id, reason: 'every event day is in the past' });
-    if (announced.get(id) !== 'past') {
-      announced.set(id, 'past');
-      console.log(`[calendarSync] #${id} "${detail.subject}": every event day is in the past — leaving it alone`);
+  // Replies since the last note: "Field: value" lines go into the ticket.
+  const values = currentValues(detail, ctx);
+  const fieldUpdates = {};
+  const notes = [];
+  let replied = false;
+  for (const c of comments) {
+    if (isCheckComment(c) || (last && c.createTime <= last.time)) continue;
+    for (const [role, text] of Object.entries(ctx.checker.readReply(entryText(c)))) {
+      replied = true;
+      const attr = ctx.attrsByRole[role];
+      const parsed = ctx.checker.replyValue(role, text);
+      if (parsed.error || !attr) {
+        notes.push(`Couldn't use "${FIELD_NAMES[role]}: ${text}" from the reply: ${parsed.error || 'no such field'}.`);
+        continue;
+      }
+      if (String(values[role]) !== String(parsed.value)) {
+        values[role] = parsed.value;
+        fieldUpdates[attr.id] = parsed.value;
+      }
     }
+  }
+  const hasUpdates = Object.keys(fieldUpdates).length > 0;
+  const updateLine = hasUpdates
+    ? ` Fill in from reply: ${Object.entries(fieldUpdates).map(([aid, v]) => `${ctx.attrsById.get(Number(aid)).name} = ${JSON.stringify(v)}`).join(', ')}.`
+    : '';
+
+  const check = ctx.checker.validate(values);
+
+  if (!check.ok) {
+    needsInfo.add(id);
+    const current = last && last.kind === 'missing' && last.hash === check.signature;
+    if (current && !replied) return;
+    const problemText = check.problems.map((p) => `${FIELD_NAMES[p.role]}: ${p.problem}`).join('; ');
+    result.missing.push({ id, problems: check.problems });
+    announce(id, `#${id} "${detail.subject}" (${status}): missing info — ${problemText}.${updateLine} Post the missing-info form.`);
+    if (DRY_RUN) return;
+    if (hasUpdates) await updateTicket(detail, { fieldUpdates });
+    await postNote(id, ctx.checker.missingNote(check, notes));
     return;
   }
 
-  // Primary by the main date; anyone covering another day joins as additional.
-  const assigneeId = assigneeFor(parsed.main.weekday);
-  const additionalIds = [
-    ...new Set([...(detail.additionalAssignedTechnicianIds || []), ...days.map((w) => assigneeFor(w.weekday))]),
-  ].filter((tid) => tid && tid !== assigneeId);
-  const nameOf = (tid) => ctx.technicianNames.get(tid) || (tid ? `Technician #${tid}` : 'nobody (set CALENDAR_SYNC_ASSIGNEE_*)');
-  const assigneeNames = [assigneeId, ...additionalIds].map(nameOf).join(' + ');
-  const plan = {
-    id,
-    subject: detail.subject,
-    days: days.map((w) => ({ start: w.start.toISOString(), end: w.end.toISOString() })),
-    skippedPastDays: parsed.days.length - days.length,
-    assignee: nameOf(assigneeId),
-    additionalAssignees: additionalIds.map(nameOf),
-  };
+  // Passes: approve (and assign) unless the latest note already approves exactly this.
+  const approvedCurrent = last && last.kind === 'approved' && last.hash === check.fingerprint;
+  const nameOf = (tid) => ctx.technicianNames.get(tid) || `Technician #${tid}`;
+  let assigneeNames = [detail.assignedAppUserId, ...(detail.additionalAssignedTechnicianIds || [])].filter(Boolean).map(nameOf).join(' + ') || 'Unassigned';
 
+  if (!approvedCurrent || hasUpdates) {
+    const assigneeId = assigneeFor(check.main.weekday);
+    const additionalIds = [
+      ...new Set([...(detail.additionalAssignedTechnicianIds || []), ...check.days.map((w) => assigneeFor(w.weekday))]),
+    ].filter((tid) => tid && tid !== assigneeId);
+    assigneeNames = [assigneeId, ...additionalIds].filter(Boolean).map(nameOf).join(' + ');
+    const assignChanged =
+      assigneeId !== detail.assignedAppUserId ||
+      additionalIds.length !== (detail.additionalAssignedTechnicianIds || []).length ||
+      additionalIds.some((tid) => !(detail.additionalAssignedTechnicianIds || []).includes(tid));
+    result.approved.push({ id, days: check.days.length, assignee: assigneeNames });
+    announce(
+      id,
+      `#${id} "${detail.subject}" (${status}): approved — ${check.days.map(ctx.checker.dayText).join('; ')} at ${check.location}; assign ${assigneeNames}.${updateLine}`
+    );
+    if (!DRY_RUN) {
+      if (hasUpdates || assignChanged) {
+        await updateTicket(detail, { fieldUpdates, ...(assignChanged ? { assigneeId, additionalIds } : {}) });
+      }
+      await postNote(id, ctx.checker.approvalNote(check, assigneeNames));
+      lastNoteAt.delete(id); // the "added" note may follow straight away
+    }
+  }
+
+  if (!isAdd) return;
+
+  announce(`${id}:add`, `#${id} "${detail.subject}": add ${check.days.length} event(s) to the calendar.`);
   if (DRY_RUN) {
-    result.planned.push(plan);
-    const signature = JSON.stringify(plan);
-    if (announced.get(id) !== signature) {
-      announced.set(id, signature);
-      const when = days.map((w) => `${formatWhen(w.start)} – ${new Date(w.end).toLocaleTimeString('en-US', { timeZone: TIME_ZONE, timeStyle: 'short' })}`);
-      const past = plan.skippedPastDays ? ` (skipping ${plan.skippedPastDays} past day(s))` : '';
-      console.log(
-        `[calendarSync] DRY RUN #${id} "${detail.subject}": would add ${days.length} event(s)${past}: ${when.join('; ')}; assign ${assigneeNames}; set "${TO_STATUS}"`
-      );
-    }
+    result.added.push({ id, days: check.days.length });
     return;
   }
-
-  const eventIds = [];
   let created = 0;
-  for (const w of days) {
-    const existing = await findEvent(id, w.day);
-    const event =
-      existing ||
-      (await graph.post(`/users/${encodeURIComponent(MAILBOX)}/events`, buildEvent(detail, fields, w, days, assigneeNames)));
-    if (!existing) created++;
-    eventIds.push(event.id);
+  for (const w of check.days) {
+    if (await findEvent(id, w.day)) continue;
+    await graph.post(`/users/${encodeURIComponent(MAILBOX)}/events`, buildEvent(detail, ctx, w, check, assigneeNames));
+    created++;
   }
-
-  await ninja.write.put(`/v2/ticketing/ticket/${id}`, updateBody(detail, ctx.toStatusId, assigneeId, additionalIds));
-  state.synced[id] = { at: Date.now() / 1000, eventIds };
-  ctx.changed = true;
-
-  const problems = await verifyUpdate(detail, ctx.toStatusId, assigneeId, additionalIds);
-  if (problems.length) {
-    halted = `Calendar sync stopped after updating ticket #${id}: ${problems.join('; ')}. Check the ticket in NinjaOne, then restart the backend.`;
-    throw new Error(halted);
-  }
-  result.synced.push(plan);
-  console.log(`[calendarSync] #${id} added to calendar (${created} new of ${days.length} event(s)), assigned ${assigneeNames}`);
+  await postNote(id, ctx.checker.addedNote(check, created));
+  settled.set(id, status);
+  result.added.push({ id, days: check.days.length, created });
+  console.log(`[calendarSync] #${id} added to calendar (${created} new of ${check.days.length} event(s))`);
 }
 
 async function run() {
   const error = configError();
   if (error) return { ok: false, error };
 
-  const [boards, statuses, attributes, technicians] = await Promise.all([
+  const [boards, attributes, technicians] = await Promise.all([
     ninja.get('/v2/ticketing/trigger/boards'),
-    ninja.get('/v2/ticketing/statuses'),
     ninja.get('/v2/ticketing/attributes'),
     ninja.get('/v2/user/technicians'),
   ]);
-
   const board = boards.find((b) => b.name === AV_BOARD);
   if (!board) return { ok: false, error: `No NinjaOne board named "${AV_BOARD}" (check .env)` };
-  const toStatus = statuses.find((s) => s.displayName === TO_STATUS);
-  if (!toStatus) return { ok: false, error: `No NinjaOne status named "${TO_STATUS}" (check .env)` };
 
+  const attrsByRole = {};
+  for (const [role, name] of Object.entries(FIELD_NAMES)) {
+    attrsByRole[role] = attributes.find((a) => a.name === name) || null;
+  }
+  for (const role of ['date', 'start', 'end', 'location']) {
+    if (!attrsByRole[role]) return { ok: false, error: `No ticket field named "${FIELD_NAMES[role]}" (check .env)` };
+  }
   const ctx = {
-    toStatusId: toStatus.statusId,
     attrsById: new Map(attributes.map((a) => [a.id, a])),
+    attrsByRole,
     technicianNames: new Map(technicians.map((t) => [t.id, [t.firstName, t.lastName].filter(Boolean).join(' ') || t.email])),
-    changed: false,
+    checker: makeChecker({
+      labels: FIELD_NAMES,
+      timeZone: TIME_ZONE,
+      locationOptions: (attrsByRole.location.content.values || []).filter((o) => o.active !== false),
+    }),
   };
 
   const { rows } = await ninja.runBoard(board.id);
-  const candidates = rows.filter((t) => t.status && t.status.displayName === FROM_STATUS);
-
-  // Tickets handled by hand (or deleted) no longer need the marker or retries.
-  const candidateIds = new Set(candidates.map((t) => String(t.id)));
-  for (const id of Object.keys(state.needsInfo)) {
-    if (!candidateIds.has(id)) {
-      delete state.needsInfo[id];
-      ctx.changed = true;
-    }
-  }
-  for (const [id, entry] of Object.entries(state.synced)) {
-    if (Date.now() / 1000 - entry.at > SYNCED_KEEP_MS / 1000) {
-      delete state.synced[id];
-      ctx.changed = true;
-    }
+  const statusOf = (t) => t.status && t.status.displayName;
+  const candidates = rows.filter((t) => CHECK_STATUSES.includes(statusOf(t)) || statusOf(t) === ADD_STATUS);
+  for (const [id, status] of settled) {
+    if (!candidates.some((t) => t.id === id && statusOf(t) === status)) settled.delete(id);
   }
 
-  const result = { ok: true, dryRun: DRY_RUN, planned: [], synced: [], skipped: [], errors: [] };
-  try {
-    // One at a time: there are only a few new AV tickets, and a failure
-    // partway should leave as little half-done as possible.
-    for (const row of candidates) {
-      try {
-        await syncTicket(row, ctx, result);
-      } catch (err) {
-        if (halted) throw err;
-        result.errors.push({ id: row.id, error: err.message });
-        console.error(`[calendarSync] #${row.id} failed: ${err.message}`);
-      }
+  const result = { ok: true, dryRun: DRY_RUN, approved: [], missing: [], added: [], errors: [] };
+  const nextNeedsInfo = new Set();
+  const previous = needsInfo;
+  needsInfo = nextNeedsInfo; // processTicket adds to it
+  // One at a time: few tickets, and a failure partway should leave as
+  // little half-done as possible.
+  for (const row of candidates) {
+    try {
+      await processTicket(row, ctx, result);
+    } catch (err) {
+      if (previous.has(row.id)) nextNeedsInfo.add(row.id); // keep the marker until it's checked again
+      if (halted) throw err;
+      result.errors.push({ id: row.id, error: err.message });
+      console.error(`[calendarSync] #${row.id} failed: ${err.message}`);
     }
-  } finally {
-    if (ctx.changed) saveState();
   }
-
-  result.needsInfo = Object.entries(state.needsInfo).map(([id, v]) => ({
-    id: Number(id),
-    reason: v.reason,
-    nextAttemptAt: new Date(v.nextAttemptAt).toISOString(),
-  }));
+  result.needsInfo = [...nextNeedsInfo];
   return result;
 }
 
@@ -416,4 +428,4 @@ async function getStats() {
   return lastResult;
 }
 
-module.exports = { getStats, needsInfoIds, syncedAt };
+module.exports = { getStats, needsInfoIds };

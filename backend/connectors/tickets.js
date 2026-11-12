@@ -9,8 +9,8 @@
 // additional assignee IDs, every form field) and its log (comments, notes,
 // status changes) — to work out the comment markers; see commentMarkers()
 // for the rules. Closed AV tickets get the details call only.
-// AV tickets the calendar sync couldn't schedule (unreadable event times)
-// also get a "needs info" marker; see ./calendarSync.js.
+// AV tickets that fail the calendar check (missing or unreadable event
+// details) also get a "needs info" marker; see ./calendarSync.js.
 //
 // Boards, fields and statuses are matched by their display names (set in
 // .env, defaults below), so renaming one in NinjaOne means updating .env to
@@ -18,6 +18,7 @@
 
 const ninja = require('../lib/ninja');
 const calendarSync = require('./calendarSync');
+const { isCheckComment } = require('../lib/calendarCheck');
 const { isChecked, parseRecurringDays } = require('../lib/recurringDays');
 
 const IT_BOARD = process.env.NINJAONE_IT_BOARD || 'IT Support Requests';
@@ -51,9 +52,6 @@ const DETAIL_CONCURRENCY = 5; // parallel per-ticket lookups
 // A status change saved together with a comment can be logged a moment
 // before it; treat anything this close as "at the same time".
 const SAME_SAVE_SECONDS = 5;
-// The calendar sync's own status change is logged as the technician who
-// signed it in; ignore status changes this close to when it ran.
-const SYNC_STATUS_WINDOW_SECONDS = 120;
 
 // Runs fn over items with at most `limit` calls in flight.
 async function mapLimit(items, limit, fn) {
@@ -75,23 +73,15 @@ async function mapLimit(items, limit, fn) {
 // - private (red): the latest private note by anyone, assignee included.
 // Either one also clears when a technician changes the status at or after
 // it. Status changes by requesters or automation don't count, so an
-// automatic status flip on an email reply can't hide the marker. Neither
-// does the calendar sync's change (syncedAt, epoch seconds), since no one
-// has read the comment yet.
-function commentMarkers(log, assigneeId, syncedAt) {
-  const comments = log.filter((e) => e.type === 'COMMENT' && !e.system);
+// automatic status flip on an email reply can't hide the marker. The
+// calendar sync's own "[Calendar check]" notes never count as comments.
+function commentMarkers(log, assigneeId) {
+  const comments = log.filter((e) => e.type === 'COMMENT' && !e.system && !isCheckComment(e));
   const latest = (entries) => entries.reduce((max, e) => Math.max(max, e.createTime), -Infinity);
   const isAssignee = (e) => assigneeId != null && e.appUserContactType === 'TECHNICIAN' && e.appUserContactId === assigneeId;
 
   const lastStatusChange = latest(
-    log.filter(
-      (e) =>
-        e.changeDiff &&
-        e.changeDiff.status &&
-        e.appUserContactType === 'TECHNICIAN' &&
-        !e.automation &&
-        !(syncedAt != null && Math.abs(e.createTime - syncedAt) <= SYNC_STATUS_WINDOW_SECONDS)
-    )
+    log.filter((e) => e.changeDiff && e.changeDiff.status && e.appUserContactType === 'TECHNICIAN' && !e.automation)
   );
   const clearedByStatus = (time) => lastStatusChange >= time - SAME_SAVE_SECONDS;
 
@@ -123,7 +113,7 @@ async function ticketDetails(id, technicianNames, { withMarkers }) {
       additionalAssignees: (detail.additionalAssignedTechnicianIds || [])
         .filter((tid) => tid !== assigneeId)
         .map((tid) => technicianNames.get(tid) || `Technician #${tid}`),
-      ...commentMarkers(Array.isArray(log) ? log : [], assigneeId, calendarSync.syncedAt(id)),
+      ...commentMarkers(Array.isArray(log) ? log : [], assigneeId),
     },
     attributeValues,
   };

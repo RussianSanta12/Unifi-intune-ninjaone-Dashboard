@@ -78,25 +78,33 @@ function known(list) {
   return list.filter((t) => t.minutes !== undefined).map((t) => t.minutes);
 }
 
+// -> { ok: true, startMinutes, endMinutes } or { ok: false, reason, problems }
+// where problems = [{ field: 'start' | 'end', reason }], one per bad field,
+// so a form can point at each field that needs fixing.
 function parseTimes(startText, endText) {
+  const fail = (problems) => ({ ok: false, problems, reason: problems.map((p) => p.reason).join('; ') });
   let start = resolveWithinField(tokens(startText));
   let end = resolveWithinField(tokens(endText));
-  if (!start.length) return { ok: false, reason: `Can't read a start time from "${startText || ''}"` };
-  if (!end.length) return { ok: false, reason: `Can't read an end time from "${endText || ''}"` };
+  const unreadable = [];
+  if (!start.length) unreadable.push({ field: 'start', reason: startText ? `can't read a time from "${startText}"` : 'empty' });
+  if (!end.length) unreadable.push({ field: 'end', reason: endText ? `can't read a time from "${endText}"` : 'empty' });
+  if (unreadable.length) return fail(unreadable);
 
   const startKnown = known(start);
   const endKnown = known(end);
   start = resolveAgainst(start, endKnown.length ? Math.max(...endKnown) : undefined, true);
   end = resolveAgainst(end, startKnown.length ? Math.min(...startKnown) : undefined, false);
 
-  if (start.some((t) => t.minutes === undefined)) return { ok: false, reason: `Start time "${startText}" needs am/pm` };
-  if (end.some((t) => t.minutes === undefined)) return { ok: false, reason: `End time "${endText}" needs am/pm` };
+  const ambiguous = [];
+  if (start.some((t) => t.minutes === undefined)) ambiguous.push({ field: 'start', reason: `"${startText}" needs am/pm` });
+  if (end.some((t) => t.minutes === undefined)) ambiguous.push({ field: 'end', reason: `"${endText}" needs am/pm` });
+  if (ambiguous.length) return fail(ambiguous);
 
   const startMinutes = Math.min(...known(start));
   const endMinutes = Math.max(...known(end));
-  if (endMinutes <= startMinutes) return { ok: false, reason: `End time "${endText}" isn't after start "${startText}"` };
+  if (endMinutes <= startMinutes) return fail([{ field: 'end', reason: `"${endText}" isn't after the start "${startText}"` }]);
   if (endMinutes - startMinutes > MAX_EVENT_MINUTES) {
-    return { ok: false, reason: `"${startText}" to "${endText}" is longer than ${MAX_EVENT_MINUTES / 60} hours` };
+    return fail([{ field: 'end', reason: `"${startText}" to "${endText}" is longer than ${MAX_EVENT_MINUTES / 60} hours` }]);
   }
   return { ok: true, startMinutes, endMinutes };
 }
@@ -148,7 +156,7 @@ function dayKey(ms, timeZone) {
 // timeZone. Returns UTC start/end instants, the event's weekday (0 = Sun)
 // and its day as "YYYY-MM-DD".
 function eventWindow({ dateMs, startText, endText, timeZone }) {
-  if (!Number.isFinite(dateMs)) return { ok: false, reason: 'No event date' };
+  if (!Number.isFinite(dateMs)) return { ok: false, reason: 'No event date', problems: [{ field: 'date', reason: 'empty' }] };
   const times = parseTimes(startText, endText);
   if (!times.ok) return times;
   const date = zonedParts(dateMs, timeZone);
@@ -161,4 +169,4 @@ function eventWindow({ dateMs, startText, endText, timeZone }) {
   };
 }
 
-module.exports = { parseTimes, eventWindow, dayKey };
+module.exports = { parseTimes, eventWindow, dayKey, zonedParts, zonedToUtc };
