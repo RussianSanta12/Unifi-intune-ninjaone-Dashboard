@@ -92,14 +92,19 @@ function getAccessToken() {
 }
 
 async function refreshAccessToken() {
+  // Another process (a script, or a second backend) may have refreshed and
+  // rotated the token since we loaded it; the file always has the newest.
+  refreshToken = loadRefreshToken() || refreshToken;
   if (!isConnected()) {
     throw new Error('NinjaOne write access is not connected (sign in at /auth/ninjaone/start)');
   }
+  const used = refreshToken;
   try {
-    return await tokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken });
+    return await tokenRequest({ grant_type: 'refresh_token', refresh_token: used });
   } catch (err) {
-    // A rejected refresh token won't start working again; require a new sign-in.
-    if (err.status === 400 || err.status === 401) {
+    // A rejected refresh token won't start working again; require a new
+    // sign-in — unless someone saved a newer one meanwhile.
+    if ((err.status === 400 || err.status === 401) && loadRefreshToken() === used) {
       refreshToken = null;
       fs.rmSync(TOKEN_FILE, { force: true });
     }
