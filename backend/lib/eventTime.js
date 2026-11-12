@@ -48,16 +48,18 @@ function readings({ hour, minute }) {
 }
 
 // Fill in am/pm from the nearest token in the same field that has one —
-// preferring the next one, since ranges put am/pm last ("5-6pm", "11-1pm").
+// preferring the next one, since ranges put am/pm last ("5-6pm", "11-1pm") —
+// taking whichever reading is closer to it. Setup notes can come either side
+// of the event time ("2:30pm (2:15 setup)", "setup 4:30, event 5pm").
 function resolveWithinField(list) {
   return list.map((t, i) => {
     if (t.minutes !== undefined) return t;
-    const next = list.slice(i + 1).find((o) => o.minutes !== undefined);
-    const prev = list.slice(0, i).reverse().find((o) => o.minutes !== undefined);
+    const neighbour =
+      list.slice(i + 1).find((o) => o.minutes !== undefined) ||
+      list.slice(0, i).reverse().find((o) => o.minutes !== undefined);
+    if (!neighbour) return t;
     const [am, pm] = readings(t);
-    if (next) return { minutes: pm <= next.minutes && next.minutes - pm < 12 * 60 ? pm : am };
-    if (prev) return { minutes: pm >= prev.minutes ? pm : am };
-    return t;
+    return { minutes: Math.abs(pm - neighbour.minutes) <= Math.abs(am - neighbour.minutes) ? pm : am };
   });
 }
 
@@ -136,8 +138,15 @@ function zonedToUtc({ year, month, day }, minutes, timeZone) {
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+// "YYYY-MM-DD" of an instant's calendar day in a time zone; compares as text.
+function dayKey(ms, timeZone) {
+  const { year, month, day } = zonedParts(ms, timeZone);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 // dateMs is the DATE field's value (epoch ms); the calendar day is read in
-// timeZone. Returns UTC start/end instants plus the event's weekday (0 = Sun).
+// timeZone. Returns UTC start/end instants, the event's weekday (0 = Sun)
+// and its day as "YYYY-MM-DD".
 function eventWindow({ dateMs, startText, endText, timeZone }) {
   if (!Number.isFinite(dateMs)) return { ok: false, reason: 'No event date' };
   const times = parseTimes(startText, endText);
@@ -146,9 +155,10 @@ function eventWindow({ dateMs, startText, endText, timeZone }) {
   return {
     ok: true,
     weekday: WEEKDAYS.indexOf(date.weekday),
+    day: dayKey(dateMs, timeZone),
     start: new Date(zonedToUtc(date, times.startMinutes, timeZone)),
     end: new Date(zonedToUtc(date, times.endMinutes, timeZone)),
   };
 }
 
-module.exports = { parseTimes, eventWindow };
+module.exports = { parseTimes, eventWindow, dayKey };

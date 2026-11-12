@@ -18,6 +18,7 @@
 
 const ninja = require('../lib/ninja');
 const calendarSync = require('./calendarSync');
+const { isChecked, parseRecurringDays } = require('../lib/recurringDays');
 
 const IT_BOARD = process.env.NINJAONE_IT_BOARD || 'IT Support Requests';
 const AV_BOARD = process.env.NINJAONE_AV_BOARD || 'AV Support Requests';
@@ -135,31 +136,6 @@ function attributeValue(values, attributeId) {
   return entry ? entry.value : undefined;
 }
 
-const isChecked = (value) => value === true || value === 'true' || value === 1 || value === '1';
-
-// "11:4, 11:16, 12:13" (month:day) -> sorted epoch ms at local noon, like
-// the event date field. No year is given, so each day takes whichever year
-// puts it closest to the ticket's event date (or today, if it has none).
-// Entries that don't parse or don't exist (e.g. 2:30) are skipped.
-function parseRecurringDays(text, baseMs) {
-  const base = baseMs != null && Number.isFinite(baseMs) ? baseMs : Date.now();
-  const baseYear = new Date(base).getFullYear();
-  const days = new Set();
-  for (const part of String(text || '').split(/[,;\n]+/)) {
-    const match = part.trim().match(/^(\d{1,2})\s*[:/]\s*(\d{1,2})$/);
-    if (!match) continue;
-    const month = Number(match[1]) - 1;
-    const day = Number(match[2]);
-    const candidates = [baseYear - 1, baseYear, baseYear + 1]
-      .map((year) => new Date(year, month, day, 12))
-      .filter((d) => d.getMonth() === month && d.getDate() === day);
-    if (!candidates.length) continue;
-    const nearest = candidates.reduce((a, b) => (Math.abs(a - base) <= Math.abs(b - base) ? a : b));
-    days.add(nearest.getTime());
-  }
-  return [...days].sort((a, b) => a - b);
-}
-
 // Looks a form field up by name: its ID, plus a text formatter that turns a
 // dropdown's option ID into the option's name (board runs already return the
 // name; ticket details return the ID).
@@ -223,7 +199,7 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, field
   const recurringMs = (ticket) => {
     const checked = read(ticket, fields.recurring);
     if (checked === undefined) return undefined;
-    return isChecked(checked) ? parseRecurringDays(read(ticket, fields.recurringDays), ticket.sortKey) : [];
+    return isChecked(checked) ? parseRecurringDays(read(ticket, fields.recurringDays), ticket.sortKey).days : [];
   };
 
   const [rangeStart, rangeEnd] = calendarRange();

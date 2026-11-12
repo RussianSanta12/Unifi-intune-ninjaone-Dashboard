@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node --env-file=.env server.js",
     "dev": "node --env-file=.env --watch server.js",
-    "discover": "node --env-file=.env scripts/discover.js"
+    "discover": "node --env-file=.env scripts/discover.js",
+    "check-times": "node scripts/check-times.js"
   },
   "dependencies": {
     "express": "^4.19.2"
