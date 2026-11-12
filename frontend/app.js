@@ -111,7 +111,20 @@ function ticketMarkers(ticket) {
   return markers.length ? `<span class="markers">${markers.join('')}</span>` : '';
 }
 
-// Title and assignees on the left; the ticket's location on the right.
+// Title and assignees on the left; location (and "needed by") on the right.
+function formatShortDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Right side of a list row: the location, with the "needed by" date beneath
+// it when the panel has a date field (LIST_PANEL_DATE_FIELD).
+function issueSide(ticket) {
+  const lines = [];
+  if (ticket.location) lines.push(`<span class="issue-location">${escapeHtml(ticket.location)}</span>`);
+  if (ticket.neededBy) lines.push(`<span class="issue-due">Needed by ${escapeHtml(formatShortDate(ticket.neededBy))}</span>`);
+  return lines.length ? `<div class="issue-side">${lines.join('')}</div>` : '';
+}
+
 function ticketLabel(ticket) {
   const assignees = ticket.assignee ? [ticket.assignee, ...(ticket.additionalAssignees || [])].join(' + ') : 'Unassigned';
   return (
@@ -120,7 +133,7 @@ function ticketLabel(ticket) {
     `<span class="issue-title"><span class="ticket-id">#${escapeHtml(ticket.id)}</span>${escapeHtml(ticket.subject)}</span>` +
     escapeHtml(assignees) +
     '</div>' +
-    (ticket.location ? `<span class="issue-location">${escapeHtml(ticket.location)}</span>` : '')
+    issueSide(ticket)
   );
 }
 
@@ -155,10 +168,13 @@ const dayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDat
 // entirely when CALENDAR_SYNC_ENABLED isn't on.
 let calendarSyncEnabled = false;
 
+// The status names, from the last poll (NINJAONE_TICKET_STATUSES).
+let statusNames = [];
+
 function avLegend(unassignedCount) {
   return [
     `<span class="legend-item legend-unassigned${unassignedCount ? ' active' : ''}">&#9888; ${unassignedCount} Unassigned</span>`,
-    '<span class="legend-item"><span class="legend-fill status-2"></span>Added to Calendar</span>',
+    `<span class="legend-item"><span class="legend-fill status-2"></span>${escapeHtml(statusNames[2] || 'Added to Calendar')}</span>`,
     '<span class="legend-item"><span class="marker marker-public"></span>Public comment</span>',
     '<span class="legend-item"><span class="marker marker-private"></span>Private note</span>',
     calendarSyncEnabled ? '<span class="legend-item"><span class="marker marker-info"></span>Needs event info</span>' : '',
@@ -333,7 +349,9 @@ function weekEvent(ticket) {
     `<div class="week-title">${escapeHtml(ticket.subject)}</div>` +
     (ticket.location ? `<div class="week-row">&#128205; <b>${escapeHtml(ticket.location)}</b></div>` : '') +
     `<div class="week-row week-who">&#128100; ${escapeHtml(assignees)}</div>` +
-    `<div class="week-row">${recurring}#${escapeHtml(ticket.id)}${ticket.requester ? ` · ${escapeHtml(ticket.requester)}` : ''}</div>` +
+    `<div class="week-row">${recurring}#${escapeHtml(ticket.id)}` +
+    (ticket.attendees ? ` · &#128101; <b>${escapeHtml(ticket.attendees)}</b>` : '') +
+    `${ticket.requester ? ` · ${escapeHtml(ticket.requester)}` : ''}</div>` +
     '</div>'
   );
 }
@@ -395,8 +413,22 @@ function renderWeek(sideData) {
   setStatus('week-status', sideData);
 }
 
+// Page and panel titles are per department (.env); the backend sends them.
+function renderTitles(labels) {
+  if (!labels) return;
+  if (labels.dashboard) document.title = labels.dashboard;
+  setText('dashboard-title', labels.dashboard);
+  setText('tickets-it-title', labels.list);
+  setText('tickets-av-title', labels.calendar);
+  setText('week-title', labels.week);
+}
+
 function renderTickets(data) {
   const ok = data && data.ok !== false;
+  if (ok) {
+    statusNames = data.statuses || [];
+    renderTitles(data.labels);
+  }
   // If the whole connector failed, show its error on every panel.
   renderTicketSide('it', ok ? data.it : data, ok ? data.statuses : []);
   renderWeek(ok ? data.av : data);

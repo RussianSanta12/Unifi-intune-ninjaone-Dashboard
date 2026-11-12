@@ -1,6 +1,6 @@
-# Stats Dashboard
+# Tickets Dashboard
 
-Locally hosted dashboard showing this week's AV events, open IT support requests and an AV support-request monthly calendar from NinjaOne Ticketing, sized for 16:9 displays.
+Locally hosted dashboard of a department's NinjaOne Ticketing requests, sized for 16:9 displays: a list of open requests, a monthly calendar of event requests, and this week's events on top. Which boards, fields and titles it shows is set per department in `.env` — IT/AV by default (IT Support Requests + AV Support Requests); see "Departments" below.
 
 > **Scope:** UniFi and Intune are paused for now. Their connector files are still in `backend/connectors/`, but the backend doesn't poll them and the page doesn't show them. See PLAN.md.
 
@@ -9,7 +9,8 @@ Locally hosted dashboard showing this week's AV events, open IT support requests
 ```
 Unifi-intune-ninjaone-Dashboard/
 ├── backend/          Node/Express server — polls NinjaOne, serves /api/stats + the frontend
-│   ├── connectors/   One module per integration (active: tickets.js for IT/AV requests; ninjaone.js device counts are kept but not polled)
+│   ├── connectors/   One module per integration (active: tickets.js for the ticket panels, calendarSync.js for the AV calendar sync; ninjaone.js device counts are kept but not polled)
+│   ├── lib/panels.js Which boards, fields and titles this department's copy shows (from .env)
 │   ├── .env          Fill this in with your real credentials (gitignored)
 │   ├── .env.example  Safe-to-commit template
 │   └── server.js
@@ -48,6 +49,15 @@ PORT=3001 ./start.sh  # use a different port without editing .env
 `start.sh` also reinstalls dependencies when `package-lock.json` changes (for example after switching branches). On a headless server it just prints the URL; open it from the display machine at `http://<server-ip>:3000`.
 
 Only run one copy of the dashboard at a time (Windows or Linux): both would share the same NinjaOne API client, and each new sign-in cancels the other's.
+
+## Departments
+
+Each department runs its own copy of the dashboard, with its own `.env` saying which NinjaOne boards and fields to show and what to call them (`DASHBOARD_TITLE`, `LIST_PANEL_*`, `CALENDAR_PANEL_*`, `WEEK_PANEL_TITLE`; see `backend/.env.example`, which includes a Maintenance example). For another department:
+
+1. Put a separate copy of the project in its own folder (the start/stop scripts keep their `.env`, PID file and logs inside the folder).
+2. Give it its own `backend/.env` with that department's names and a different `PORT` (e.g. 3001).
+3. Give it **its own NinjaOne API app** (API Services, Monitoring scope) — two copies sharing one app log each other out.
+4. Set `CALENDAR_SYNC_ENABLED=false` unless that department also uses the calendar sync (AV only).
 
 ## Notes
 

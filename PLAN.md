@@ -1,4 +1,4 @@
-# Stats Dashboard — Plan
+# Tickets Dashboard — Plan
 
 > **Current scope (2026-10-29): NinjaOne only.** UniFi and Intune are paused
 > and will be revisited later. Their connectors (`backend/connectors/unifi.js`,
@@ -65,6 +65,8 @@ OAuth 2.0, **Client Credentials flow** (machine-to-machine, no user login needed
   - **Red** = latest private/internal note by anyone, *including* the primary assignee.
   - Both also clear when a **technician** changes the status at or after the comment (same save counts). Status changes by requesters or automation are ignored, because NinjaOne reopens tickets automatically on email replies (e.g. Closed → In Progress), which would otherwise hide the marker. No time-based expiry.
   - Costs 2 extra calls per shown ticket per poll (`GET /v2/ticketing/ticket/{id}` and `/log-entry`), plus one `GET /v2/user/technicians` for assignee names.
+
+**Departments** (`backend/lib/panels.js`): the page title, the two panels' titles, and the boards/fields behind them come from `.env` (`DASHBOARD_TITLE`, `LIST_PANEL_*`, `CALENDAR_PANEL_*`, `WEEK_PANEL_TITLE`), defaulting to IT/AV; the backend sends the titles with `/api/stats`, so the HTML has nothing department-specific. Each department runs its own copy (own folder, `.env`, port and NinjaOne API app). Maintenance: list = Maintenance Requests (form 2) with "Date Service Needed by:" shown as **Needed by …** under the location; calendar = Event Maintenance Requests (form 4, no recurring fields) with **Estimated Number of Attendees** as "👥 N" on the week cards' bottom line; `CALENDAR_SYNC_ENABLED=false`. Old `NINJAONE_IT_*` / `NINJAONE_AV_*` names still work as fallbacks. Assignee names come from the ticket details, since the Maintenance boards have no Assignee column.
 
 **AV calendar check + sync** (`connectors/calendarSync.js`, rules in `lib/calendarCheck.js`), runs every poll:
 - **On/off:** `CALENDAR_SYNC_ENABLED=true` turns the whole feature on; anything else (the default in `.env.example`) means it isn't polled, `/api/stats` has no `calendarSync` section, and the page shows no banner, dry-run tag or "Needs event info" key — the dashboard looks as it did before the sync. `CALENDAR_SYNC_DRY_RUN` then decides whether an enabled sync writes.

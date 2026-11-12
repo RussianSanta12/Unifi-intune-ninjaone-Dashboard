@@ -38,15 +38,18 @@ const ninjaWebAuth = require('../lib/ninjaWebAuth');
 const graph = require('../lib/graph');
 const { isChecked } = require('../lib/recurringDays');
 const { isCheckComment, entryText, readCheckComment, makeChecker } = require('../lib/calendarCheck');
+const panels = require('../lib/panels');
 
-const AV_BOARD = process.env.NINJAONE_AV_BOARD || 'AV Support Requests';
+// The calendar panel's board and fields (../lib/panels.js), so the sync and
+// the page always agree.
+const AV_BOARD = panels.calendar.board;
 const FIELD_NAMES = {
-  date: process.env.NINJAONE_AV_EVENT_DATE_FIELD || 'Date of Event / Program',
-  start: process.env.NINJAONE_AV_START_TIME_FIELD || 'Event Start Time',
-  end: process.env.NINJAONE_AV_END_TIME_FIELD || 'End Time',
-  location: process.env.NINJAONE_AV_LOCATION_FIELD || 'Location(IT)',
-  recurring: process.env.NINJAONE_AV_RECURRING_FIELD || 'Reoccurring Event',
-  recurringDays: process.env.NINJAONE_AV_RECURRING_DAYS_FIELD || 'Reoccurring Days',
+  date: panels.calendar.fields.date,
+  start: panels.calendar.fields.startTime,
+  end: panels.calendar.fields.endTime,
+  location: panels.calendar.fields.location,
+  recurring: panels.calendar.fields.recurring,
+  recurringDays: panels.calendar.fields.recurringDays,
 };
 const CHECK_STATUSES = (process.env.CALENDAR_SYNC_CHECK_STATUSES || 'New,In Progress').split(',').map((s) => s.trim());
 const ADD_STATUS = process.env.CALENDAR_SYNC_ADD_STATUS || 'Added to Calendar';

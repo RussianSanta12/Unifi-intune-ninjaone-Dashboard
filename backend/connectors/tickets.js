@@ -1,16 +1,19 @@
-// NinjaOne ticketing connector — open IT and AV support requests.
+// NinjaOne ticketing connector — the page's two ticket panels.
 //
 // Reads two ticket boards that already exist in NinjaOne, each filtered to
-// one ticket form ("IT Support Request" / "AV Support Request"). Running a
+// one ticket form: the list panel's (e.g. "IT Support Requests") and the
+// calendar panel's (e.g. "AV Support Requests"). Which boards, fields and
+// titles is per department, from .env via ../lib/panels.js. Running a
 // board returns the assignee's name, the requester's name and the board's
 // custom-field columns in one paginated call per board.
 //
 // Each shown ticket also gets two extra calls — its details (primary and
 // additional assignee IDs, every form field) and its log (comments, notes,
 // status changes) — to work out the comment markers; see commentMarkers()
-// for the rules. Closed AV tickets get the details call only.
-// AV tickets that fail the calendar check (missing or unreadable event
-// details) also get a "needs info" marker; see ./calendarSync.js.
+// for the rules. Closed calendar-panel tickets get the details call only.
+// Calendar-panel tickets that fail the calendar check (missing or
+// unreadable event details) also get a "needs info" marker; see
+// ./calendarSync.js.
 //
 // Boards, fields and statuses are matched by their display names (set in
 // .env, defaults below), so renaming one in NinjaOne means updating .env to
@@ -20,33 +23,22 @@ const ninja = require('../lib/ninja');
 const calendarSync = require('./calendarSync');
 const { isCheckComment } = require('../lib/calendarCheck');
 const { isChecked, parseRecurringDays } = require('../lib/recurringDays');
+const panels = require('../lib/panels');
 
-const IT_BOARD = process.env.NINJAONE_IT_BOARD || 'IT Support Requests';
-const AV_BOARD = process.env.NINJAONE_AV_BOARD || 'AV Support Requests';
-const AV_EVENT_DATE_FIELD = process.env.NINJAONE_AV_EVENT_DATE_FIELD || 'Date of Event / Program';
 // Order matters: tickets sort by this order, and the frontend colors by position.
 const STATUSES = (process.env.NINJAONE_TICKET_STATUSES || 'New,In Progress,Added to Calendar')
   .split(',')
   .map((s) => s.trim());
-// AV only: closed tickets stay on the calendar (shown brown). Only ones whose
-// event falls in the calendar's range are kept, and they skip the log call
-// since closed tickets show no markers.
-const AV_CLOSED_STATUS = process.env.NINJAONE_AV_CLOSED_STATUS || 'Closed';
+// Calendar panel only: closed tickets stay on the calendar (shown brown).
+// Only ones whose event falls in the calendar's range are kept, and they skip
+// the log call since closed tickets show no markers.
 const CLOSED_RANGE_PAD_DAYS = 7; // the grid spills up to 6 days into the neighboring months
-// AV form fields shown on the weekly calendar. These don't need to be board
-// columns; anything the board lacks is read from the ticket's details.
-const AV_FIELDS = {
-  startTime: process.env.NINJAONE_AV_START_TIME_FIELD || 'Event Start Time',
-  endTime: process.env.NINJAONE_AV_END_TIME_FIELD || 'End Time',
-  location: process.env.NINJAONE_AV_LOCATION_FIELD || 'Location(IT)',
-  // Recurring events: a checkbox, and a text list of extra days ("11:4, 11:16").
-  recurring: process.env.NINJAONE_AV_RECURRING_FIELD || 'Reoccurring Event',
-  recurringDays: process.env.NINJAONE_AV_RECURRING_DAYS_FIELD || 'Reoccurring Days',
-};
-// IT form fields shown on the IT list.
-const IT_FIELDS = {
-  location: process.env.NINJAONE_IT_LOCATION_FIELD || 'Location(IT)',
-};
+// Form fields sent for each ticket (see ../lib/panels.js). These don't need
+// to be board columns; anything the board lacks is read from the ticket's
+// details. The calendar panel's event date is read separately: it must be a
+// board column, for sorting and range filtering.
+const { date: CALENDAR_DATE_FIELD, ...CALENDAR_FIELDS } = panels.calendar.fields;
+const LIST_FIELDS = panels.list.fields;
 
 const DETAIL_CONCURRENCY = 5; // parallel per-ticket lookups
 // A status change saved together with a comment can be logged a moment
@@ -105,10 +97,14 @@ async function ticketDetails(id, technicianNames, { withMarkers }) {
   ]);
   // Every field on the ticket's form, for fields the board has no column for.
   const attributeValues = detail.attributeValues || [];
-  if (!withMarkers) return { extras: {}, attributeValues };
   const assigneeId = detail.assignedAppUserId ?? null;
+  // The board only names the assignee if it has an Assignee column (the
+  // Maintenance boards don't); the details always have the ID.
+  const assignee = assigneeId == null ? null : technicianNames.get(assigneeId) || `Technician #${assigneeId}`;
+  if (!withMarkers) return { extras: { assignee }, attributeValues };
   return {
     extras: {
+      assignee,
       unassigned: assigneeId == null,
       additionalAssignees: (detail.additionalAssignedTechnicianIds || [])
         .filter((tid) => tid !== assigneeId)
@@ -153,8 +149,9 @@ function calendarRange(now = new Date()) {
 }
 
 // `fieldNames` ({ key: field name }) are the form fields to send for each
-// ticket. `av` turns on the AV extras: event date, closed tickets, the weekly
-// calendar's times and recurring days.
+// ticket; empty names are fields the department doesn't use. `av` (the
+// calendar panel) turns on the extras: event date, closed tickets, the weekly
+// calendar's times, recurring days and attendees.
 async function loadBoard(boards, technicianNames, boardName, { av = false, fieldNames = {}, allAttributes = [] } = {}) {
   const board = boards.find((b) => b.name === boardName);
   if (!board) {
@@ -165,13 +162,17 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, field
 
   let eventDateId = null;
   if (av) {
-    eventDateId = Object.keys(attributes).find((id) => attributes[id].name === AV_EVENT_DATE_FIELD);
+    eventDateId = Object.keys(attributes).find((id) => attributes[id].name === CALENDAR_DATE_FIELD);
     if (!eventDateId) {
-      return { ok: false, error: `Board "${boardName}" has no "${AV_EVENT_DATE_FIELD}" column (check .env)` };
+      return { ok: false, error: `Board "${boardName}" has no "${CALENDAR_DATE_FIELD}" column (check .env)` };
     }
   }
   const lookup = fieldLookup(attributes, allAttributes);
-  const fields = Object.fromEntries(Object.entries(fieldNames).map(([key, name]) => [key, lookup(name)]));
+  const fields = Object.fromEntries(
+    Object.entries(fieldNames)
+      .filter(([, name]) => name) // not used by this department
+      .map(([key, name]) => [key, lookup(name)])
+  );
   for (const [key, field] of Object.entries(fields)) {
     if (!field && !warnedMissingFields.has(fieldNames[key])) {
       warnedMissingFields.add(fieldNames[key]);
@@ -197,7 +198,7 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, field
   const tickets = rows
     .map((t) => {
       const statusName = t.status && t.status.displayName;
-      const closed = av && statusName === AV_CLOSED_STATUS;
+      const closed = av && statusName === panels.calendar.closedStatus;
       return { row: t, closed, statusIndex: STATUSES.indexOf(statusName) };
     })
     .filter((t) => t.statusIndex !== -1 || t.closed)
@@ -234,9 +235,14 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, field
     t.detailValues = details[i].attributeValues;
     const text = (field) => (field ? field.text(read(t, field)) : null);
     t.location = text(fields.location);
+    if (fields.neededBy) {
+      const ms = Number(read(t, fields.neededBy));
+      t.neededBy = ms ? new Date(ms).toISOString() : null;
+    }
     if (av) {
       t.startTime = text(fields.startTime);
       t.endTime = text(fields.endTime);
+      if (fields.attendees) t.attendees = text(fields.attendees);
       // Extra days besides the event date itself.
       const eventMs = t.eventDate ? Date.parse(t.eventDate) : null;
       t.recurringDates = (recurringMs(t) || []).filter((ms) => ms !== eventMs).map((ms) => new Date(ms).toISOString());
@@ -249,11 +255,22 @@ async function loadBoard(boards, technicianNames, boardName, { av = false, field
   return { ok: true, count: tickets.filter((t) => !t.closed).length, tickets };
 }
 
+// The page's titles, sent with every poll so the HTML has nothing
+// department-specific in it.
+function titles() {
+  return {
+    dashboard: panels.dashboardTitle,
+    list: panels.list.title,
+    calendar: panels.calendar.title,
+    week: panels.calendar.weekTitle,
+  };
+}
+
 async function getStats() {
   const [boards, technicians, allAttributes] = await Promise.all([
     ninja.get('/v2/ticketing/trigger/boards'),
     ninja.get('/v2/user/technicians'),
-    // Field definitions, for AV fields that aren't board columns and for
+    // Field definitions, for fields that aren't board columns and for
     // dropdown option names; not fatal if it fails.
     ninja.get('/v2/ticketing/attributes').catch((err) => {
       console.warn(`[tickets] Could not list ticket fields: ${err.message}`);
@@ -264,11 +281,12 @@ async function getStats() {
     technicians.map((t) => [t.id, [t.firstName, t.lastName].filter(Boolean).join(' ') || t.email])
   );
   const attributeList = Array.isArray(allAttributes) ? allAttributes : [];
+  // `it` / `av` are the list and calendar panels (named for the first department).
   const [it, av] = await Promise.all([
-    loadBoard(boards, technicianNames, IT_BOARD, { fieldNames: IT_FIELDS, allAttributes: attributeList }),
-    loadBoard(boards, technicianNames, AV_BOARD, { av: true, fieldNames: AV_FIELDS, allAttributes: attributeList }),
+    loadBoard(boards, technicianNames, panels.list.board, { fieldNames: LIST_FIELDS, allAttributes: attributeList }),
+    loadBoard(boards, technicianNames, panels.calendar.board, { av: true, fieldNames: CALENDAR_FIELDS, allAttributes: attributeList }),
   ]);
-  return { ok: true, statuses: STATUSES, it, av };
+  return { ok: true, statuses: STATUSES, labels: titles(), it, av };
 }
 
 module.exports = { getStats };
