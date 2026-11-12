@@ -108,5 +108,25 @@ check(Boolean(checker.replyValue('location', 'main library', now).error), 'ambig
 const past = checker.validate({ date: Date.UTC(2026, 10, 1, 17), start: '2pm', end: '4pm', location: 'a1' }, now);
 check(!past.ok && past.problems[0].role === 'date', 'an event in the past is not approved');
 
+// The dashboard banner: each real error message gets the right reason.
+const { alertFor } = require('../connectors/calendarSync');
+const ALERT_CASES = [
+  ['NinjaOne write access not connected — open http://localhost:3000/auth/ninjaone/start on the server', 'error', "isn't signed in"],
+  ['NinjaOne web-app token request failed: 400 Bad Request {"error":"invalid_grant"}', 'error', 'sign-in was rejected'],
+  ['Calendar/Azure AD token request failed: 401 Unauthorized', 'error', 'client secret expired'],
+  ['Graph request failed (POST /users/x/events): 403 Forbidden ErrorAccessDenied', 'error', 'No permission'],
+  ['Calendar sync stopped after updating ticket #1135: field 15 changed', 'error', 'stopped itself'],
+  ['Calendar sync not configured: CALENDAR_MAILBOX (check .env)', 'error', 'settings are missing'],
+  ['No ticket field named "End Time" (check .env)', 'error', 'no longer matches'],
+  ['something nobody expected', 'error', 'Calendar sync error'],
+];
+for (const [message, level, words] of ALERT_CASES) {
+  const a = alertFor({ ok: false, error: message });
+  check(a.level === level && a.reason.includes(words) && a.detail === message, `banner for "${message.slice(0, 45)}…": ${a.reason}`);
+}
+const ticketAlert = alertFor({ ok: true, errors: [{ id: 1135, error: 'Graph request failed (POST /users/x/events): 500 Internal Server Error' }] });
+check(ticketAlert.level === 'warn' && ticketAlert.detail.startsWith('#1135'), `banner for a failed ticket: ${ticketAlert.reason}`);
+check(alertFor({ ok: true, errors: [] }) === null, 'no banner when all is well');
+
 console.log(failures ? `\n${failures} failed` : '\nall passed');
 process.exit(failures ? 1 : 0);

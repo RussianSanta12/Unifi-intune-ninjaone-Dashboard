@@ -10,8 +10,12 @@
     <header class="dashboard-header">
       <img src="logo/logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
       <h1>Stats Dashboard</h1>
+      <span id="sync-mode" class="sync-mode" hidden></span>
       <span id="last-updated" class="last-updated">Loading…</span>
     </header>
+
+    <!-- Calendar sync problems (see renderSyncAlert in app.js) -->
+    <div id="sync-alert" class="sync-alert" role="alert" hidden></div>
 
     <section class="panel panel-week" id="panel-week">
       <div class="panel-heading">

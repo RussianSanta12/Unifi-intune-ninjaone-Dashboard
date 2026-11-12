@@ -417,15 +417,58 @@ async function run() {
   return result;
 }
 
+// What an error means for staff, and which runbook section fixes it.
+// Shown in the dashboard's alert banner (see `alert` below).
+const PROBLEMS = [
+  [/write access not connected/i, "NinjaOne write access isn't signed in", 'Sign in again: runbook "Re-sign in to NinjaOne".'],
+  [/web-app token request failed/i, 'The NinjaOne sign-in was rejected (revoked, account disabled, or app secret changed)', 'Sign in again: runbook "Re-sign in to NinjaOne".'],
+  [/Azure AD token request failed/i, "The Microsoft calendar app can't sign in (client secret expired or wrong)", 'Renew the secret: runbook "Renew the Microsoft client secret".'],
+  [/Graph request failed.*(403|AccessDenied)/i, 'No permission to the AV Events Calendar', 'Check the Entra app\'s admin consent and the Exchange access policy (runbook "Reference").'],
+  [/Graph request failed/i, 'The AV Events Calendar could not be updated', 'Check the error below; it usually clears on the next run.'],
+  [/sync stopped|can't be read back/i, 'The sync stopped itself after an unexpected result', 'Check the ticket named below, then restart: runbook "If the sync stopped itself".'],
+  [/not configured/i, 'Calendar sync settings are missing', 'Fill in the settings named below in backend/.env and restart.'],
+  [/No NinjaOne board|No ticket field|No NinjaOne status/i, 'A NinjaOne board or field name no longer matches', 'Update the name in backend/.env to match NinjaOne and restart.'],
+  [/NinjaOne request failed.*\b401\b|NinjaOne token request failed/i, "Can't read from NinjaOne", 'Check the NinjaOne read app credentials in backend/.env.'],
+];
+
+function describe(message) {
+  const match = PROBLEMS.find(([re]) => re.test(message));
+  return match ? { reason: match[1], action: match[2] } : { reason: 'Calendar sync error', action: 'Check backend/server.err.log on the dashboard VM.' };
+}
+
+// null when all is well; otherwise what the banner should say.
+function alertFor(result) {
+  if (!result.ok) {
+    return { level: 'error', ...describe(result.error), detail: result.error };
+  }
+  if (result.errors && result.errors.length) {
+    const first = result.errors[0];
+    const { reason, action } = describe(first.error);
+    return {
+      level: 'warn',
+      reason: `${result.errors.length} ticket(s) couldn't be processed — ${reason}`,
+      action,
+      detail: `#${first.id}: ${first.error}`,
+    };
+  }
+  return null;
+}
+
 async function getStats() {
   if (running) return lastResult; // previous run still going — don't double-book
   running = true;
   try {
     lastResult = { ...(await run()), lastRunAt: new Date().toISOString() };
+  } catch (err) {
+    // Includes the sync halting itself; report it like any other failure.
+    console.error(`[calendarSync] ${err.message}`);
+    lastResult = { ok: false, error: err.message, lastRunAt: new Date().toISOString() };
   } finally {
     running = false;
   }
+  lastResult.alert = alertFor(lastResult);
+  lastResult.dryRun = DRY_RUN;
   return lastResult;
 }
 
-module.exports = { getStats, needsInfoIds };
+module.exports = { getStats, needsInfoIds, alertFor }; // alertFor: for npm run check-calendar

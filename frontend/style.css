@@ -68,6 +68,71 @@ html, body {
   border-bottom: 0.4vh solid var(--brand-gold);
 }
 
+/* "Calendar sync: dry run" tag, next to the last-updated time. */
+.sync-mode {
+  font-size: 1.2vh;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3vh 0.8vw;
+  white-space: nowrap;
+}
+
+/* Calendar sync problem banner, under the header. Only shown when broken,
+   so it takes its height from the panels below while it's up. */
+.sync-alert {
+  display: flex;
+  align-items: center;
+  gap: 1vw;
+  padding: 1vh 1.2vw;
+  border-radius: 8px;
+  border-left: 0.6vw solid;
+  font-size: 1.6vh;
+  line-height: 1.35;
+}
+
+.sync-alert[hidden] {
+  display: none;
+}
+
+.sync-alert-error {
+  background: #5c1222;
+  border-color: var(--bad);
+  color: var(--white);
+}
+
+.sync-alert-warn {
+  background: #4a3500;
+  border-color: var(--warn);
+  color: var(--white);
+}
+
+.sync-alert-icon {
+  font-size: 2.6vh;
+}
+
+.sync-alert-error .sync-alert-icon {
+  color: var(--bad);
+}
+
+.sync-alert-warn .sync-alert-icon {
+  color: var(--warn);
+}
+
+.sync-alert-text {
+  min-width: 0;
+}
+
+/* The raw error, for whoever fixes it; one line, cut off if long. */
+.sync-alert-detail {
+  font-size: 1.2vh;
+  color: var(--text-muted);
+  font-family: Consolas, 'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The logo is a rounded tile; the radius clips its square corners. */
 .dashboard-header .logo {
   height: 5.5vh;

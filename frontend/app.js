@@ -409,12 +409,55 @@ window.addEventListener('resize', () => {
   renderAvCalendar(avCalendarData);
 });
 
+// The calendar sync runs every poll; if it hasn't finished a run in this
+// long, it's stuck (or the backend's timer stopped).
+const SYNC_STALE_MS = 10 * 60_000;
+
+// Banner under the header when the calendar sync isn't working: red when it
+// can't run at all, amber when some tickets failed or it's gone quiet. The
+// reason and fix come from the backend (connectors/calendarSync.js). In dry
+// run there's no banner, just a small tag in the header.
+function renderSyncAlert(sync) {
+  const banner = document.getElementById('sync-alert');
+  const mode = document.getElementById('sync-mode');
+  if (!banner || !mode) return;
+
+  let alert = sync && sync.alert;
+  const ranAt = sync && sync.lastRunAt ? Date.parse(sync.lastRunAt) : null;
+  if (!alert && ranAt && Date.now() - ranAt > SYNC_STALE_MS) {
+    alert = {
+      level: 'warn',
+      reason: `Calendar sync hasn't run since ${new Date(ranAt).toLocaleTimeString()}`,
+      action: 'Check backend/server.err.log on the dashboard VM, then restart the dashboard.',
+    };
+  }
+
+  if (alert) {
+    banner.className = `sync-alert sync-alert-${alert.level === 'error' ? 'error' : 'warn'}`;
+    banner.innerHTML =
+      '<span class="sync-alert-icon">&#9888;</span>' +
+      '<div class="sync-alert-text">' +
+      `<div><b>Calendar sync: ${escapeHtml(alert.reason)}.</b> ${escapeHtml(alert.action)}</div>` +
+      (alert.detail ? `<div class="sync-alert-detail">${escapeHtml(alert.detail)}</div>` : '') +
+      '</div>';
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
+
+  const dryRun = sync && sync.dryRun;
+  mode.textContent = dryRun ? 'Calendar sync: dry run' : '';
+  mode.title = dryRun ? 'Logging only — not writing to tickets or the calendar (CALENDAR_SYNC_DRY_RUN=true)' : '';
+  mode.hidden = !dryRun;
+}
+
 async function refresh() {
   try {
     const res = await fetch('/api/stats');
     const data = await res.json();
 
     renderTickets(data.tickets);
+    renderSyncAlert(data.calendarSync);
 
     const lastUpdated = document.getElementById('last-updated');
     if (lastUpdated) {
