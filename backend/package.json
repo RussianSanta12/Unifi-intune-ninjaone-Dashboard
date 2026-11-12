@@ -8,7 +8,8 @@
     "start": "node --env-file=.env server.js",
     "dev": "node --env-file=.env --watch server.js",
     "discover": "node --env-file=.env scripts/discover.js",
-    "check-calendar": "node scripts/check-calendar.js"
+    "check-calendar": "node scripts/check-calendar.js",
+    "check-connections": "node --env-file=.env scripts/check-connections.js"
   },
   "dependencies": {
     "express": "^4.19.2"
