@@ -22,6 +22,9 @@ const report = (status, label, detail) => {
 };
 
 async function main() {
+  if (process.env.CALENDAR_SYNC_ENABLED !== 'true') {
+    console.log('NOTE  CALENDAR_SYNC_ENABLED is not true — the dashboard is not running the calendar sync.\n');
+  }
   console.log('--- Microsoft Graph (events calendar)');
   if (!graph.isConfigured() || !MAILBOX) {
     report('FAIL', 'CALENDAR_TENANT_ID / CALENDAR_CLIENT_ID / CALENDAR_CLIENT_SECRET / CALENDAR_MAILBOX', 'not all set in .env');

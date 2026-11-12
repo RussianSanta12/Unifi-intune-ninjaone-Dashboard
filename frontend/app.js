@@ -151,13 +151,17 @@ function startOfDay(date) {
 
 const dayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 
+// Set from /api/stats each refresh: the backend leaves calendarSync out
+// entirely when CALENDAR_SYNC_ENABLED isn't on.
+let calendarSyncEnabled = false;
+
 function avLegend(unassignedCount) {
   return [
     `<span class="legend-item legend-unassigned${unassignedCount ? ' active' : ''}">&#9888; ${unassignedCount} Unassigned</span>`,
     '<span class="legend-item"><span class="legend-fill status-2"></span>Added to Calendar</span>',
     '<span class="legend-item"><span class="marker marker-public"></span>Public comment</span>',
     '<span class="legend-item"><span class="marker marker-private"></span>Private note</span>',
-    '<span class="legend-item"><span class="marker marker-info"></span>Needs event info</span>',
+    calendarSyncEnabled ? '<span class="legend-item"><span class="marker marker-info"></span>Needs event info</span>' : '',
   ].join('');
 }
 
@@ -416,7 +420,8 @@ const SYNC_STALE_MS = 10 * 60_000;
 // Banner under the header when the calendar sync isn't working: red when it
 // can't run at all, amber when some tickets failed or it's gone quiet. The
 // reason and fix come from the backend (connectors/calendarSync.js). In dry
-// run there's no banner, just a small tag in the header.
+// run there's no banner, just a small tag in the header. With the sync turned
+// off (no calendarSync in /api/stats) neither is shown.
 function renderSyncAlert(sync) {
   const banner = document.getElementById('sync-alert');
   const mode = document.getElementById('sync-mode');
@@ -456,6 +461,7 @@ async function refresh() {
     const res = await fetch('/api/stats');
     const data = await res.json();
 
+    calendarSyncEnabled = Boolean(data.calendarSync);
     renderTickets(data.tickets);
     renderSyncAlert(data.calendarSync);
 
