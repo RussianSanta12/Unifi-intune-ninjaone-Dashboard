@@ -1,6 +1,6 @@
 # Stats Dashboard
 
-Locally hosted dashboard showing NinjaOne device health counts and open IT / AV support requests from NinjaOne Ticketing, sized for 16:9 displays.
+Locally hosted dashboard showing this week's AV events, open IT support requests and an AV support-request monthly calendar from NinjaOne Ticketing, sized for 16:9 displays.
 
 > **Scope:** UniFi and Intune are paused for now. Their connector files are still in `backend/connectors/`, but the backend doesn't poll them and the page doesn't show them. See PLAN.md.
 
@@ -9,7 +9,7 @@ Locally hosted dashboard showing NinjaOne device health counts and open IT / AV 
 ```
 Unifi-intune-ninjaone-Dashboard/
 ├── backend/          Node/Express server — polls NinjaOne, serves /api/stats + the frontend
-│   ├── connectors/   One module per integration (active: ninjaone.js for device counts, tickets.js for IT/AV requests)
+│   ├── connectors/   One module per integration (active: tickets.js for IT/AV requests; ninjaone.js device counts are kept but not polled)
 │   ├── .env          Fill this in with your real credentials (gitignored)
 │   ├── .env.example  Safe-to-commit template
 │   └── server.js
@@ -27,6 +27,27 @@ Unifi-intune-ninjaone-Dashboard/
 If ticket panels show a "no board named" or "no column" error, run `npm run discover` from `backend/` to print the real names from NinjaOne and fix them in `.env`.
 
 Server output goes to `backend/server.log` and `backend/server.err.log`. To run it in the foreground instead, use `npm start` from `backend/`.
+
+### Linux / macOS
+
+Needs Node 20.6 or newer (Node 22 LTS recommended). Distro packages are often older; on Debian/Ubuntu use NodeSource:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
+
+Then, from the project folder:
+
+```bash
+./start.sh          # installs deps if needed, starts in the background, opens the browser if there's a desktop
+./stop.sh           # shuts it down
+PORT=3001 ./start.sh  # use a different port without editing .env
+```
+
+`start.sh` also reinstalls dependencies when `package-lock.json` changes (for example after switching branches). On a headless server it just prints the URL; open it from the display machine at `http://<server-ip>:3000`.
+
+Only run one copy of the dashboard at a time (Windows or Linux): both would share the same NinjaOne API client, and each new sign-in cancels the other's.
 
 ## Notes
 

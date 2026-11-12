@@ -29,6 +29,8 @@
   --marker-private: #ff2d2d;
   --marker-info: var(--white);  /* AV ticket needs event info */
   --on-fill: #001a40;     /* text on a filled (unassigned) row */
+  --closed: #8b5a2b;      /* closed AV tickets on the calendar */
+  --on-closed: #f5e6d3;
 }
 
 * {
@@ -62,13 +64,13 @@ html, body {
   display: flex;
   align-items: center;
   gap: 1.5vw;
-  padding-bottom: 1.5vh;
+  padding-bottom: 1vh;
   border-bottom: 0.4vh solid var(--brand-gold);
 }
 
 /* The logo is a rounded tile; the radius clips its square corners. */
 .dashboard-header .logo {
-  height: 7vh;
+  height: 5.5vh;
   max-width: 10vw;
   object-fit: contain;
   border-radius: 15%;
@@ -99,7 +101,6 @@ html, body {
   flex-direction: column;
 }
 
-.panel h2,
 .panel h3 {
   font-weight: 600;
   color: var(--brand-blue);
@@ -107,18 +108,13 @@ html, body {
   letter-spacing: 0.06em;
 }
 
-.panel h2 {
-  font-size: 1.9vh;
-  margin-bottom: 1.5vh;
-}
-
 .panel h3 {
   font-size: 1.5vh;
   margin-bottom: 1vh;
 }
 
-/* Generic horizontal row of equal-width items, used for the stat cards
-   and the IT / AV ticket panels. */
+/* Generic horizontal row of equal-width items, used for the IT / AV
+   ticket panels. */
 .row {
   display: flex;
   gap: 1.5vw;
@@ -133,35 +129,220 @@ html, body {
   min-height: 0;
 }
 
-/* Generic rounded stat card. */
-.card {
+/* --- AV events this week, across the top --- */
+/* Sized by its content: two fixed-height cards per day (see .week-events). */
+.panel-week {
+  --week-card-h: 8.4vh;
+  flex: 0 0 auto;
+  padding-top: 1.4vh;
+  padding-bottom: 1.2vh;
+}
+
+.panel-week .panel-heading {
+  margin-bottom: 0.8vh;
+}
+
+/* Bottom row: the month calendar gets more width than the IT list. */
+#panel-tickets-it {
+  flex: 2;
+}
+
+#panel-tickets-av {
+  flex: 3;
+}
+
+.week-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.5vw;
+}
+
+.week-day {
   background: var(--card);
-  border-radius: 10px;
-  padding: 1.5vh 0.5vw;
+  border: 2px solid transparent;
+  border-radius: 6px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.stat-value {
-  font-size: 4vh;
+.week-day.today {
+  border-color: var(--brand-gold);
+}
+
+/* Past days: darker box; cards only fade a little so colors still read. */
+.week-day.past {
+  background: var(--bg);
+}
+
+.week-day.past .week-event {
+  opacity: 0.75;
+}
+
+.week-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.4vw;
+  padding: 0.6vh 0.5vw;
+  border-bottom: 1px solid var(--border);
+}
+
+.week-day-name {
+  font-size: 1.3vh;
   font-weight: 700;
   color: var(--white);
-}
-
-.stat-label {
-  font-size: 1.2vh;
-  color: var(--text-muted);
-  text-align: center;
-  margin-top: 0.5vh;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
-/* --- NinjaOne stats bar across the top --- */
-.panel-stats {
-  flex: 0 0 auto;
+.week-day.today .week-day-name {
+  color: var(--brand-gold);
+}
+
+.week-day-date {
+  font-size: 1.2vh;
+  color: var(--text-muted);
+}
+
+/* Sits in the day's header row, so alert days stay the same height. */
+.week-unassigned {
+  flex: 1;
+  min-width: 0;
+  background: var(--bad);
+  color: var(--on-fill);
+  font-size: 1.1vh;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: 3px;
+  padding: 0.1vh 0.3vw;
+  animation: cal-pulse 2s ease-in-out infinite;
+}
+
+/* Exactly two cards tall; scrolls on its own (app.js) when the day has more. */
+.week-events {
+  flex: none;
+  height: calc(2 * var(--week-card-h) + 0.5vh + 1vh);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5vh;
+  padding: 0.5vh 0.4vw;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.week-events::-webkit-scrollbar {
+  display: none;
+}
+
+.week-empty {
+  color: var(--text-faint);
+  font-size: 1.2vh;
+  font-style: italic;
+  text-align: center;
+  margin-top: 1vh;
+}
+
+.week-event {
+  position: relative;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-left: 0.35vw solid var(--dot);
+  border-radius: 4px;
+  height: var(--week-card-h);
+  overflow: hidden;
+  padding: 0.4vh 0.5vw;
+  font-size: 1.15vh;
+  line-height: 1.3;
+}
+
+.week-time {
+  font-weight: 700;
+  font-size: 1.25vh;
+  color: var(--brand-gold);
+  padding-right: 0.8vw; /* room for the corner markers */
+}
+
+.week-title {
+  font-weight: 600;
+  font-size: 1.25vh;
+  color: var(--white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.week-row {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.week-row b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.week-event.unassigned .week-who {
+  color: var(--bad);
+  font-weight: 700;
+}
+
+.week-tag {
+  display: inline-block;
+  font-size: 1vh;
+  font-weight: 700;
+  padding: 0 0.3vw;
+  margin-right: 0.3vw;
+  border-radius: 3px;
+  background: var(--border);
+  color: var(--white);
+}
+
+/* Same fills as the month calendar: green Added to Calendar, brown Closed. */
+.week-event.status-2 {
+  background: var(--status-2);
+}
+
+.week-event.closed {
+  background: var(--closed);
+  border-left-color: var(--closed);
+}
+
+.week-event.status-2 .week-time,
+.week-event.status-2 .week-title,
+.week-event.status-2 .week-row,
+.week-event.status-2 .week-row b {
+  color: var(--on-fill);
+}
+
+.week-event.closed .week-time,
+.week-event.closed .week-title,
+.week-event.closed .week-row,
+.week-event.closed .week-row b {
+  color: var(--on-closed);
+}
+
+.week-event .markers {
+  left: auto;
+  right: 0.3vw;
+  bottom: auto;
+  top: 0.5vh;
+  flex-direction: row;
+  gap: 0.2vw;
+}
+
+.week-event .marker {
+  width: 0.3vw;
+  height: 1.3vh;
 }
 
 /* --- IT / AV ticket panels: fill the rest of the screen --- */
@@ -170,11 +351,13 @@ html, body {
   min-width: 0;
 }
 
+/* The key drops under the heading when the panel is too narrow for both. */
 .panel-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: 1vw;
+  gap: 0.6vh 1vw;
   margin-bottom: 1vh;
 }
 
@@ -197,6 +380,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 0.4vw;
+  white-space: nowrap;
 }
 
 .legend-dot {
@@ -208,10 +392,10 @@ html, body {
 
 .issue-list {
   list-style: none;
-  /* Widen the scroll box across the panel padding so the markers (left of
-     each row) aren't clipped; rows stay where they were. */
-  margin-left: -1.5vw;
-  padding-left: 1.5vw;
+  /* Widen the scroll box into the panel padding so the comment markers
+     (left of each row) aren't clipped; rows stay where they were. */
+  margin-left: -1.2vw;
+  padding-left: 1.2vw;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -239,6 +423,29 @@ html, body {
 .issue-list li {
   position: relative;
   border-left: 0.5vw solid var(--dot);
+  display: flex;
+  align-items: center;
+  gap: 1vw;
+}
+
+.issue-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The ticket's location, on the right of the row. */
+.issue-location {
+  flex: 0 1 auto;
+  max-width: 45%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-size: 1.2vh;
+}
+
+.issue-list li.unassigned .issue-location {
+  color: var(--on-fill);
 }
 
 /* Unassigned: the whole row fills with its status color. */
@@ -281,11 +488,6 @@ html, body {
   background: var(--marker-private);
 }
 
-/* "Needs info" gets its own column left of the comment markers. */
-.markers-info {
-  left: -1.75vw;
-}
-
 .marker-info {
   background: var(--marker-info);
 }
@@ -320,12 +522,220 @@ html, body {
   font-style: italic;
 }
 
-.stat-value.stat-bad {
-  color: var(--bad);
+/* --- AV monthly calendar --- */
+.month-label {
+  font-size: 1.5vh;
+  font-weight: 600;
+  color: var(--white);
+  letter-spacing: 0.04em;
 }
 
-.stat-value.stat-warn {
-  color: var(--warn);
+/* Sits in the heading row between the title and the month name. */
+.cal-legend {
+  align-items: center;
+}
+
+.legend-fill {
+  width: 1.6vh;
+  height: 1.1vh;
+  border-radius: 2px;
+  background: var(--dot);
+}
+
+/* The unassigned count lives in the key; it turns red when there are any. */
+.legend-unassigned {
+  border-radius: 3px;
+  padding: 0.2vh 0.4vw;
+  color: var(--text-faint);
+}
+
+.legend-unassigned.active {
+  background: var(--bad);
+  color: var(--on-fill);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.cal-weekdays,
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.4vh 0.3vw;
+}
+
+.cal-weekdays {
+  font-size: 1.1vh;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  text-align: center;
+  margin-bottom: 0.4vh;
+}
+
+/* 5 or 6 week rows share the remaining height evenly. */
+.cal-grid {
+  flex: 1;
+  min-height: 0;
+  grid-auto-rows: minmax(0, 1fr);
+}
+
+.cal-day {
+  background: var(--card);
+  border: 2px solid transparent;
+  border-radius: 4px;
+  padding: 0.2vh 0.3vw;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Never squash cards; overflow is handled by "+N more" in app.js. */
+.cal-day > * {
+  flex-shrink: 0;
+}
+
+.cal-day.other-month {
+  opacity: 0.55;
+}
+
+/* Past days: darker box and number; cards only fade a little so the
+   closed brown still reads as brown. */
+.cal-day.past {
+  background: var(--bg);
+}
+
+.cal-day.past .cal-day-num {
+  color: var(--text-faint);
+}
+
+.cal-day.past .cal-ticket {
+  opacity: 0.75;
+}
+
+.cal-day.today {
+  border-color: var(--brand-gold);
+}
+
+/* Unassigned alert and day number share one line to save height. */
+.cal-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3vw;
+  min-height: 1.3vh;
+}
+
+.cal-day-num {
+  font-size: 1.2vh;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+/* Just "⚠ N" here; the key above says what it means. */
+.cal-unassigned {
+  margin-right: auto;
+  background: var(--bad);
+  color: var(--on-fill);
+  font-weight: 700;
+  font-size: 1.05vh;
+  white-space: nowrap;
+  border-radius: 3px;
+  padding: 0.1vh 0.35vw;
+  animation: cal-pulse 2s ease-in-out infinite;
+}
+
+@keyframes cal-pulse {
+  50% { opacity: 0.6; }
+}
+
+.cal-ticket {
+  position: relative;
+  background: var(--panel);
+  border-left: 0.3vw solid var(--dot);
+  border-radius: 3px;
+  padding: 0.15vh 0.35vw;
+  font-size: 1.05vh;
+  line-height: 1.2;
+}
+
+/* Wraps to two lines, then ends in "…". */
+.cal-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-weight: 500;
+  color: var(--white);
+}
+
+/* Room for the corner markers, only on cards that have them. */
+.cal-ticket:has(.markers) .cal-title {
+  padding-right: 0.6vw;
+}
+
+.cal-ticket:has(.marker-info) .cal-title {
+  padding-right: 1vw; /* up to three markers */
+}
+
+.cal-ticket .ticket-id {
+  margin-right: 0;
+  font-weight: 700;
+}
+
+/* Added to Calendar: the whole card fills green. */
+.cal-ticket.status-2 {
+  background: var(--status-2);
+}
+
+.cal-ticket.status-2 .cal-title,
+.cal-ticket.status-2 .ticket-id {
+  color: var(--on-fill);
+}
+
+.cal-ticket.closed {
+  background: var(--closed);
+  border-left-color: var(--closed);
+}
+
+.cal-ticket.closed .cal-title,
+.cal-ticket.closed .ticket-id {
+  color: var(--on-closed);
+}
+
+/* Markers sit inside the card's top-right corner, side by side. */
+.cal-ticket .markers {
+  left: auto;
+  right: 0.2vw;
+  bottom: auto;
+  top: 0.3vh;
+  flex-direction: row;
+  gap: 0.15vw;
+}
+
+.cal-ticket .marker {
+  width: 0.25vw;
+  height: 1vh;
+}
+
+.cal-more {
+  font-size: 1vh;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
+}
+
+/* Without an unassigned alert, "+N more" sits at the left of the header. */
+.cal-day-head .cal-more:first-child {
+  margin-right: auto;
+}
+
+.cal-next-month {
+  margin-top: 0.8vh;
+  text-align: right;
+  font-size: 1.3vh;
+  font-weight: 600;
+  color: var(--white);
 }
 
 .panel-footer {
