@@ -100,15 +100,31 @@ function renderLegend(id, statuses) {
 }
 
 // Comment markers sit in the margin left of the status stripe (see the
-// .markers CSS): one is centered, two stack yellow over red.
+// .markers CSS): one is centered, two stack yellow over red. On AV cards
+// they sit in a row, with the "needs info" marker (tickets the calendar sync
+// couldn't schedule) first, left of the comment markers.
 function ticketMarkers(ticket) {
   const markers = [];
+  if (ticket.needsInfoMarker) markers.push('<span class="marker marker-info"></span>');
   if (ticket.publicMarker) markers.push('<span class="marker marker-public"></span>');
   if (ticket.privateMarker) markers.push('<span class="marker marker-private"></span>');
   return markers.length ? `<span class="markers">${markers.join('')}</span>` : '';
 }
 
-// Title and assignees on the left; the ticket's location on the right.
+// Title and assignees on the left; location (and "needed by") on the right.
+function formatShortDate(iso) {
+  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Right side of a list row: the location, with the "needed by" date beneath
+// it when the panel has a date field (LIST_PANEL_DATE_FIELD).
+function issueSide(ticket) {
+  const lines = [];
+  if (ticket.location) lines.push(`<span class="issue-location">${escapeHtml(ticket.location)}</span>`);
+  if (ticket.neededBy) lines.push(`<span class="issue-due">Needed by ${escapeHtml(formatShortDate(ticket.neededBy))}</span>`);
+  return lines.length ? `<div class="issue-side">${lines.join('')}</div>` : '';
+}
+
 function ticketLabel(ticket) {
   const assignees = ticket.assignee ? [ticket.assignee, ...(ticket.additionalAssignees || [])].join(' + ') : 'Unassigned';
   return (
@@ -117,16 +133,17 @@ function ticketLabel(ticket) {
     `<span class="issue-title"><span class="ticket-id">#${escapeHtml(ticket.id)}</span>${escapeHtml(ticket.subject)}</span>` +
     escapeHtml(assignees) +
     '</div>' +
-    (ticket.location ? `<span class="issue-location">${escapeHtml(ticket.location)}</span>` : '')
+    issueSide(ticket)
   );
 }
 
-function renderTicketSide(side, sideData, statuses) {
+// autoScroll: LIST_PANEL_SCROLL in .env (yes/no).
+function renderTicketSide(side, sideData, statuses, autoScroll) {
   const ok = sideData && sideData.ok !== false;
   setText(`tickets-${side}-count`, ok ? `(${sideData.count})` : '');
   renderLegend(`tickets-${side}-legend`, statuses);
   renderIssueList(`tickets-${side}`, ok ? sideData.tickets : [], ticketLabel, {
-    autoScroll: true,
+    autoScroll,
     classFn: (ticket) => `status-${ticket.statusIndex}` + (ticket.unassigned ? ' unassigned' : ''),
   });
   setStatus(`tickets-${side}-status`, sideData);
@@ -148,12 +165,20 @@ function startOfDay(date) {
 
 const dayKey = (date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 
+// Set from /api/stats each refresh: the backend leaves calendarSync out
+// entirely when CALENDAR_SYNC_ENABLED isn't on.
+let calendarSyncEnabled = false;
+
+// The status names, from the last poll (NINJAONE_TICKET_STATUSES).
+let statusNames = [];
+
 function avLegend(unassignedCount) {
   return [
     `<span class="legend-item legend-unassigned${unassignedCount ? ' active' : ''}">&#9888; ${unassignedCount} Unassigned</span>`,
-    '<span class="legend-item"><span class="legend-fill status-2"></span>Added to Calendar</span>',
+    `<span class="legend-item"><span class="legend-fill status-2"></span>${escapeHtml(statusNames[2] || 'Added to Calendar')}</span>`,
     '<span class="legend-item"><span class="marker marker-public"></span>Public comment</span>',
     '<span class="legend-item"><span class="marker marker-private"></span>Private note</span>',
+    calendarSyncEnabled ? '<span class="legend-item"><span class="marker marker-info"></span>Needs event info</span>' : '',
   ].join('');
 }
 
@@ -325,7 +350,9 @@ function weekEvent(ticket) {
     `<div class="week-title">${escapeHtml(ticket.subject)}</div>` +
     (ticket.location ? `<div class="week-row">&#128205; <b>${escapeHtml(ticket.location)}</b></div>` : '') +
     `<div class="week-row week-who">&#128100; ${escapeHtml(assignees)}</div>` +
-    `<div class="week-row">${recurring}#${escapeHtml(ticket.id)}${ticket.requester ? ` · ${escapeHtml(ticket.requester)}` : ''}</div>` +
+    `<div class="week-row">${recurring}#${escapeHtml(ticket.id)}` +
+    (ticket.attendees ? ` · &#128101; <b>${escapeHtml(ticket.attendees)}</b>` : '') +
+    `${ticket.requester ? ` · ${escapeHtml(ticket.requester)}` : ''}</div>` +
     '</div>'
   );
 }
@@ -387,10 +414,24 @@ function renderWeek(sideData) {
   setStatus('week-status', sideData);
 }
 
+// Page and panel titles are per department (.env); the backend sends them.
+function renderTitles(labels) {
+  if (!labels) return;
+  if (labels.dashboard) document.title = labels.dashboard;
+  setText('dashboard-title', labels.dashboard);
+  setText('tickets-it-title', labels.list);
+  setText('tickets-av-title', labels.calendar);
+  setText('week-title', labels.week);
+}
+
 function renderTickets(data) {
   const ok = data && data.ok !== false;
+  if (ok) {
+    statusNames = data.statuses || [];
+    renderTitles(data.labels);
+  }
   // If the whole connector failed, show its error on every panel.
-  renderTicketSide('it', ok ? data.it : data, ok ? data.statuses : []);
+  renderTicketSide('it', ok ? data.it : data, ok ? data.statuses : [], !ok || data.listScroll !== false);
   renderWeek(ok ? data.av : data);
   renderAvCalendar(ok ? data.av : data);
 }
@@ -405,12 +446,57 @@ window.addEventListener('resize', () => {
   renderAvCalendar(avCalendarData);
 });
 
+// The calendar sync runs every poll; if it hasn't finished a run in this
+// long, it's stuck (or the backend's timer stopped).
+const SYNC_STALE_MS = 10 * 60_000;
+
+// Banner under the header when the calendar sync isn't working: red when it
+// can't run at all, amber when some tickets failed or it's gone quiet. The
+// reason and fix come from the backend (connectors/calendarSync.js). In dry
+// run there's no banner, just a small tag in the header. With the sync turned
+// off (no calendarSync in /api/stats) neither is shown.
+function renderSyncAlert(sync) {
+  const banner = document.getElementById('sync-alert');
+  const mode = document.getElementById('sync-mode');
+  if (!banner || !mode) return;
+
+  let alert = sync && sync.alert;
+  const ranAt = sync && sync.lastRunAt ? Date.parse(sync.lastRunAt) : null;
+  if (!alert && ranAt && Date.now() - ranAt > SYNC_STALE_MS) {
+    alert = {
+      level: 'warn',
+      reason: `Calendar sync hasn't run since ${new Date(ranAt).toLocaleTimeString()}`,
+      action: 'Check backend/server.err.log on the dashboard VM, then restart the dashboard.',
+    };
+  }
+
+  if (alert) {
+    banner.className = `sync-alert sync-alert-${alert.level === 'error' ? 'error' : 'warn'}`;
+    banner.innerHTML =
+      '<span class="sync-alert-icon">&#9888;</span>' +
+      '<div class="sync-alert-text">' +
+      `<div><b>Calendar sync: ${escapeHtml(alert.reason)}.</b> ${escapeHtml(alert.action)}</div>` +
+      (alert.detail ? `<div class="sync-alert-detail">${escapeHtml(alert.detail)}</div>` : '') +
+      '</div>';
+    banner.hidden = false;
+  } else {
+    banner.hidden = true;
+  }
+
+  const dryRun = sync && sync.dryRun;
+  mode.textContent = dryRun ? 'Calendar sync: dry run' : '';
+  mode.title = dryRun ? 'Logging only — not writing to tickets or the calendar (CALENDAR_SYNC_DRY_RUN=true)' : '';
+  mode.hidden = !dryRun;
+}
+
 async function refresh() {
   try {
     const res = await fetch('/api/stats');
     const data = await res.json();
 
+    calendarSyncEnabled = Boolean(data.calendarSync);
     renderTickets(data.tickets);
+    renderSyncAlert(data.calendarSync);
 
     const lastUpdated = document.getElementById('last-updated');
     if (lastUpdated) {

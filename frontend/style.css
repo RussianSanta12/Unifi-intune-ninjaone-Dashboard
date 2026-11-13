@@ -27,6 +27,7 @@
   /* Comment markers — brighter than the gold In Progress stripe. */
   --marker-public: #ffe600;
   --marker-private: #ff2d2d;
+  --marker-info: var(--white);  /* AV ticket needs event info */
   --on-fill: #001a40;     /* text on a filled (unassigned) row */
   --closed: #8b5a2b;      /* closed AV tickets on the calendar */
   --on-closed: #f5e6d3;
@@ -65,6 +66,71 @@ html, body {
   gap: 1.5vw;
   padding-bottom: 1vh;
   border-bottom: 0.4vh solid var(--brand-gold);
+}
+
+/* "Calendar sync: dry run" tag, next to the last-updated time. */
+.sync-mode {
+  font-size: 1.2vh;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3vh 0.8vw;
+  white-space: nowrap;
+}
+
+/* Calendar sync problem banner, under the header. Only shown when broken,
+   so it takes its height from the panels below while it's up. */
+.sync-alert {
+  display: flex;
+  align-items: center;
+  gap: 1vw;
+  padding: 1vh 1.2vw;
+  border-radius: 8px;
+  border-left: 0.6vw solid;
+  font-size: 1.6vh;
+  line-height: 1.35;
+}
+
+.sync-alert[hidden] {
+  display: none;
+}
+
+.sync-alert-error {
+  background: #5c1222;
+  border-color: var(--bad);
+  color: var(--white);
+}
+
+.sync-alert-warn {
+  background: #4a3500;
+  border-color: var(--warn);
+  color: var(--white);
+}
+
+.sync-alert-icon {
+  font-size: 2.6vh;
+}
+
+.sync-alert-error .sync-alert-icon {
+  color: var(--bad);
+}
+
+.sync-alert-warn .sync-alert-icon {
+  color: var(--warn);
+}
+
+.sync-alert-text {
+  min-width: 0;
+}
+
+/* The raw error, for whoever fixes it; one line, cut off if long. */
+.sync-alert-detail {
+  font-size: 1.2vh;
+  color: var(--text-muted);
+  font-family: Consolas, 'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The logo is a rounded tile; the radius clips its square corners. */
@@ -447,6 +513,32 @@ html, body {
   color: var(--on-fill);
 }
 
+/* Right side of a list row: location, with the "needed by" date beneath. */
+.issue-side {
+  flex: 0 1 auto;
+  max-width: 45%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3vh;
+}
+
+.issue-side .issue-location {
+  max-width: 100%;
+}
+
+.issue-due {
+  font-size: 1.2vh;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.issue-list li.unassigned .issue-due {
+  color: var(--on-fill);
+}
+
 /* Unassigned: the whole row fills with its status color. */
 .issue-list li.unassigned {
   background: var(--dot);
@@ -485,6 +577,10 @@ html, body {
 
 .marker-private {
   background: var(--marker-private);
+}
+
+.marker-info {
+  background: var(--marker-info);
 }
 
 .legend-box {
@@ -667,6 +763,10 @@ html, body {
 /* Room for the corner markers, only on cards that have them. */
 .cal-ticket:has(.markers) .cal-title {
   padding-right: 0.6vw;
+}
+
+.cal-ticket:has(.marker-info) .cal-title {
+  padding-right: 1vw; /* up to three markers */
 }
 
 .cal-ticket .ticket-id {

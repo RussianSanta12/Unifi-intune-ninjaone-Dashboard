@@ -6,10 +6,17 @@
 // UniFi, Intune and the NinjaOne device counts (ninjaone.js) are out of
 // scope for now (connector files are kept in ./connectors for later). To
 // bring one back, add it to CONNECTORS below.
+//
+// calendarSync checks AV tickets and writes them to the events calendar each
+// poll; its last run is at /api/stats and drives the page's alert banner.
+// It only runs when CALENDAR_SYNC_ENABLED=true — otherwise it isn't polled
+// and /api/stats has no calendarSync section, so the page shows none of it.
 
 const tickets = require('./connectors/tickets');
+const calendarSync = require('./connectors/calendarSync');
 
-const CONNECTORS = { tickets };
+const CALENDAR_SYNC_ENABLED = process.env.CALENDAR_SYNC_ENABLED === 'true';
+const CONNECTORS = { tickets, ...(CALENDAR_SYNC_ENABLED ? { calendarSync } : {}) };
 
 const REFRESH_INTERVAL_SECONDS = parseInt(process.env.REFRESH_INTERVAL_SECONDS || '60', 10);
 

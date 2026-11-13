@@ -2,20 +2,25 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Stats Dashboard</title>
+<title>Tickets Dashboard</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="dashboard">
     <header class="dashboard-header">
       <img src="logo/logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-      <h1>Stats Dashboard</h1>
+      <h1 id="dashboard-title">Tickets Dashboard</h1>
+      <span id="sync-mode" class="sync-mode" hidden></span>
       <span id="last-updated" class="last-updated">Loading…</span>
     </header>
 
+    <!-- Calendar sync problems (see renderSyncAlert in app.js) -->
+    <div id="sync-alert" class="sync-alert" role="alert" hidden></div>
+
     <section class="panel panel-week" id="panel-week">
       <div class="panel-heading">
-        <h3>AV Events This Week <span class="ticket-count" id="week-count"></span></h3>
+        <!-- Titles are per department (.env, backend/lib/panels.js); set by app.js. -->
+        <h3><span id="week-title">Events This Week</span> <span class="ticket-count" id="week-count"></span></h3>
         <span class="month-label" id="week-range"></span>
       </div>
       <div class="week-grid" id="week"></div>
@@ -25,7 +30,7 @@
     <section class="row row-grow">
       <div class="panel panel-issues" id="panel-tickets-it">
         <div class="panel-heading">
-          <h3>IT Support Requests <span class="ticket-count" id="tickets-it-count"></span></h3>
+          <h3><span id="tickets-it-title">Requests</span> <span class="ticket-count" id="tickets-it-count"></span></h3>
           <div class="legend" id="tickets-it-legend"></div>
         </div>
         <ul class="issue-list" id="tickets-it"></ul>
@@ -33,7 +38,7 @@
       </div>
       <div class="panel panel-issues" id="panel-tickets-av">
         <div class="panel-heading">
-          <h3>AV Support Requests <span class="ticket-count" id="tickets-av-count"></span></h3>
+          <h3><span id="tickets-av-title">Event Requests</span> <span class="ticket-count" id="tickets-av-count"></span></h3>
           <div class="legend cal-legend" id="tickets-av-legend"></div>
           <span class="month-label" id="tickets-av-month"></span>
         </div>
