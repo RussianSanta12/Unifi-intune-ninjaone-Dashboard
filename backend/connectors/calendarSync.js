@@ -207,12 +207,16 @@ function currentValues(detail, ctx) {
 
 // UpdateTicket requires the full ticket plus its current version; custom
 // fields are sent back unchanged except for `fieldUpdates` ({ attributeId: value }).
+// Blank fields are left out: NinjaOne returns them as null but refuses null
+// in an update (400, ticket #1146's empty "Number of Microphones Needed").
 function updateBody(detail, { fieldUpdates = {}, assigneeId, additionalIds }) {
-  const attributes = (detail.attributeValues || []).map(({ id, attributeId, value }) => ({
-    id,
-    attributeId,
-    value: attributeId in fieldUpdates ? fieldUpdates[attributeId] : value,
-  }));
+  const attributes = (detail.attributeValues || [])
+    .map(({ id, attributeId, value }) => ({
+      id,
+      attributeId,
+      value: attributeId in fieldUpdates ? fieldUpdates[attributeId] : value,
+    }))
+    .filter((a) => a.value !== null && a.value !== undefined);
   for (const [attributeId, value] of Object.entries(fieldUpdates)) {
     if (!attributes.some((a) => String(a.attributeId) === attributeId)) attributes.push({ attributeId: Number(attributeId), value });
   }
