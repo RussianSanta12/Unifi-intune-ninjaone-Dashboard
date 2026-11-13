@@ -74,8 +74,11 @@ async function fetchAccessToken() {
   return accessToken;
 }
 
-function makeClient(getToken) {
-  async function request(method, path, body) {
+// forgetToken: when given, a 401 drops the token and retries once — another
+// process (a script, a second dashboard) signing in with the same app
+// invalidates our token.
+function makeClient(getToken, forgetToken) {
+  async function request(method, path, body, retried = false) {
     const token = await getToken();
     const isForm = body instanceof FormData; // comments are multipart; fetch sets the boundary
     const res = await fetch(`${INSTANCE_URL}${path}`, {
@@ -89,6 +92,10 @@ function makeClient(getToken) {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
 
+    if (res.status === 401 && forgetToken && !retried) {
+      forgetToken(token);
+      return request(method, path, body, true);
+    }
     if (!res.ok) {
       // Writes fail with a reason in the body; reads rarely do, but it's cheap to include.
       const detail = (await res.text().catch(() => '')).slice(0, 300);
@@ -120,7 +127,9 @@ function makeClient(getToken) {
   };
 }
 
-const read = makeClient(getAccessToken);
+const read = makeClient(getAccessToken, (token) => {
+  if (accessToken === token) accessToken = null; // not if a parallel call already replaced it
+});
 
 // Board runs page with lastCursorId; a short page means we've seen them all.
 async function runBoard(boardId) {

@@ -59,6 +59,8 @@ const MAILBOX = process.env.CALENDAR_MAILBOX;
 const TIME_ZONE = process.env.CALENDAR_TIME_ZONE || 'America/New_York';
 const DRY_RUN = process.env.CALENDAR_SYNC_DRY_RUN !== 'false';
 const INSTANCE_URL = process.env.NINJAONE_INSTANCE_URL;
+// For testing: only these ticket IDs are checked/added (empty = all).
+const ONLY_TICKETS = (process.env.CALENDAR_SYNC_ONLY_TICKETS || '').split(',').map(Number).filter(Boolean);
 
 // Custom property stamped on each event ("<ticket id>:<YYYY-MM-DD>") so it
 // can be found again by ticket and day.
@@ -395,7 +397,11 @@ async function run() {
 
   const { rows } = await ninja.runBoard(board.id);
   const statusOf = (t) => t.status && t.status.displayName;
-  const candidates = rows.filter((t) => CHECK_STATUSES.includes(statusOf(t)) || statusOf(t) === ADD_STATUS);
+  const candidates = rows.filter(
+    (t) =>
+      (CHECK_STATUSES.includes(statusOf(t)) || statusOf(t) === ADD_STATUS) &&
+      (!ONLY_TICKETS.length || ONLY_TICKETS.includes(t.id))
+  );
   for (const [id, status] of settled) {
     if (!candidates.some((t) => t.id === id && statusOf(t) === status)) settled.delete(id);
   }
