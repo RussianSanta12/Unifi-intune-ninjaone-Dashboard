@@ -5,7 +5,7 @@
 
 const { parseTimes } = require('../lib/eventTime');
 const { parseRecurringDays } = require('../lib/recurringDays');
-const { makeChecker, readCheckComment, isCheckComment } = require('../lib/calendarCheck');
+const { makeChecker, readCheckComment, isCheckComment, entryText } = require('../lib/calendarCheck');
 
 const fmt = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 
@@ -90,6 +90,17 @@ check(!failed.ok && roles === 'start,end,recurringDays,location', `missing info 
 
 const form = checker.missingNote(failed);
 check(isCheckComment({ body: form }) && readCheckComment({ body: form }).kind === 'missing', 'missing-info form reads back as the sync\'s own note');
+
+// As NinjaOne returns a comment: line breaks only in htmlBody, `body` has spaces.
+const asNinja = (text) => ({
+  body: text.replace(/\s*\n\s*/g, ' '),
+  htmlBody: `<p>${text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`).replace(/\n/g, '<br>')}</p>`,
+});
+check(readCheckComment(asNinja(form)).kind === 'missing', 'missing-info form reads back from NinjaOne\'s copy (ticket #1144)');
+check(
+  Object.keys(checker.readReply(entryText(asNinja('End Time: 4pm\nReoccurring Days: 11:23')))).join(',') === 'end,recurringDays',
+  'two-line reply in NinjaOne\'s copy reads as two fields'
+);
 
 const reply = checker.readReply(
   ['Thanks!', 'Event Start Time: 7:15pm', 'end: 8:30pm', 'Location: auditorium', 'Reoccurring Days: 12:9, 12:16', '> End Time: '].join('\n')

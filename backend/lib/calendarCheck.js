@@ -43,13 +43,18 @@ function isCheckComment(entry) {
   return String(entry.body || '').trimStart().startsWith(TAG);
 }
 
-// A log entry's text; email replies sometimes only carry HTML.
+// A log entry's text, one line per line. NinjaOne's plain `body` turns line
+// breaks into spaces, so the HTML version is read when there is one.
 function entryText(entry) {
-  if (entry.body) return String(entry.body);
-  return String(entry.htmlBody || '')
-    .replace(/<br\s*\/?>|<\/p>|<\/div>/gi, '\n')
+  if (!entry.htmlBody) return String(entry.body || '');
+  return String(entry.htmlBody)
+    .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
     .replace(/&amp;/g, '&');
 }
 
