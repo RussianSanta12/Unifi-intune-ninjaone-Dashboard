@@ -3,6 +3,8 @@
 //   npm run sync-once                    dry run, every AV ticket
 //   npm run sync-once -- 1234            dry run, ticket #1234 only
 //   npm run sync-once -- --live 1234     really do it, ticket #1234 only
+//   npm run sync-once -- --preview 1234  print the calendar event(s) #1234
+//                                        would get; writes nothing
 //
 // A live run must name its tickets, so a test never touches real requests.
 // Run it a few times to walk a ticket through: check → (reply) → approved →
@@ -20,7 +22,22 @@ if (live && !ids.length) {
 process.env.CALENDAR_SYNC_DRY_RUN = live ? 'false' : 'true';
 if (ids.length) process.env.CALENDAR_SYNC_ONLY_TICKETS = ids.join(',');
 
-const { getStats } = require('../connectors/calendarSync');
+const { getStats, previewEvents } = require('../connectors/calendarSync');
+
+if (args.includes('--preview')) {
+  if (live || ids.length !== 1) {
+    console.error('Preview takes one ticket ID and no --live: npm run sync-once -- --preview 1234');
+    process.exit(1);
+  }
+  previewEvents(ids[0]).then(
+    (preview) => console.log(JSON.stringify(preview, null, 2)),
+    (err) => {
+      console.error(err.message);
+      process.exit(1);
+    }
+  );
+  return;
+}
 
 getStats().then((result) => {
   const { alert, ...rest } = result;

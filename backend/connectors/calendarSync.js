@@ -37,6 +37,7 @@ const ninja = require('../lib/ninja');
 const ninjaWebAuth = require('../lib/ninjaWebAuth');
 const graph = require('../lib/graph');
 const { isChecked } = require('../lib/recurringDays');
+const { zonedParts } = require('../lib/eventTime');
 const { isCheckComment, entryText, readCheckComment, makeChecker } = require('../lib/calendarCheck');
 const panels = require('../lib/panels');
 
@@ -105,30 +106,81 @@ function displayValue(attr, value) {
   }
 }
 
-function buildEvent(detail, ctx, window, check, assigneeNames) {
+// The event's details, in this order, as [field name, label]. The recurring
+// rows only show for recurring events; any other filled-in field follows
+// (except the date, which the calendar already shows).
+const EVENT_ROWS = [
+  ['Number of Microphones Needed'],
+  ['Check if you need IT present for entire time'],
+  ['Check if you need the Event Recorded'],
+  [FIELD_NAMES.location, 'Location'],
+  [FIELD_NAMES.start],
+  [FIELD_NAMES.end],
+  [FIELD_NAMES.recurring],
+  [FIELD_NAMES.recurringDays],
+  ['Day of Event Contact Name'],
+];
+
+// Outlook names for CALENDAR_TIME_ZONE, so events carry the local zone (sent
+// as UTC, the AV Events mailbox showed a 2:30 PM event at 7:30 PM).
+const WINDOWS_ZONES = {
+  'America/New_York': 'Eastern Standard Time',
+  'America/Chicago': 'Central Standard Time',
+  'America/Denver': 'Mountain Standard Time',
+  'America/Phoenix': 'US Mountain Standard Time',
+  'America/Los_Angeles': 'Pacific Standard Time',
+};
+
+// A Graph dateTimeTimeZone: the wall-clock time in CALENDAR_TIME_ZONE.
+function graphTime(date) {
+  const p = zonedParts(date.getTime(), TIME_ZONE);
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    dateTime: `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}:00`,
+    timeZone: WINDOWS_ZONES[TIME_ZONE] || TIME_ZONE,
+  };
+}
+
+// The ticket's description: its latest DESCRIPTION log entry.
+function descriptionOf(log) {
+  const entries = (Array.isArray(log) ? log : []).filter((e) => e.type === 'DESCRIPTION').sort((a, b) => a.createTime - b.createTime);
+  return entries.length ? entryText(entries[entries.length - 1]).trim() : '';
+}
+
+function buildEvent(detail, ctx, window, check, assigneeNames, description) {
   const ticketUrl = `${INSTANCE_URL}/#/ticketing/ticket/${detail.id}`;
-  const rows = (detail.attributeValues || [])
-    .map((v) => {
-      const attr = ctx.attrsById.get(v.attributeId);
-      const text = attr ? displayValue(attr, v.value) : null;
-      return text === null ? '' : `<tr><td><b>${escapeHtml(attr.name)}</b></td><td>${escapeHtml(text)}</td></tr>`;
-    })
+  const valueByName = new Map();
+  for (const v of detail.attributeValues || []) {
+    const attr = ctx.attrsById.get(v.attributeId);
+    const text = attr ? displayValue(attr, v.value) : null;
+    if (text !== null) valueByName.set(attr.name, text);
+  }
+  const recurring = isChecked((detail.attributeValues || []).find((v) => ctx.attrsByRole.recurring && v.attributeId === ctx.attrsByRole.recurring.id)?.value);
+  const hidden = new Set([FIELD_NAMES.date, ...(recurring ? [] : [FIELD_NAMES.recurring, FIELD_NAMES.recurringDays])]);
+  const listed = new Set(EVENT_ROWS.map(([name]) => name));
+  const rows = [...EVENT_ROWS, ...[...valueByName.keys()].filter((name) => !listed.has(name)).map((name) => [name])]
+    .filter(([name]) => name && !hidden.has(name) && valueByName.has(name))
+    .map(([name, label]) => `<tr><td><b>${escapeHtml(label || name)}</b></td><td>${escapeHtml(valueByName.get(name))}</td></tr>`)
     .join('');
   const series =
     check.days.length > 1
       ? `<p>Recurring event — day ${check.days.indexOf(window) + 1} of ${check.days.length}: ${check.days.map((d) => escapeHtml(ctx.checker.dayText(d))).join('; ')}</p>`
       : '';
+  const descriptionHtml = description
+    ? `<p><b>Description:</b><br>${escapeHtml(description).replace(/\n/g, '<br>')}</p>`
+    : '';
   return {
     subject: detail.subject,
-    start: { dateTime: window.start.toISOString().replace('Z', ''), timeZone: 'UTC' },
-    end: { dateTime: window.end.toISOString().replace('Z', ''), timeZone: 'UTC' },
+    start: graphTime(window.start),
+    end: graphTime(window.end),
     location: { displayName: check.location },
     body: {
       contentType: 'HTML',
       content:
         `<p><a href="${escapeHtml(ticketUrl)}">NinjaOne ticket #${detail.id}</a> — assigned to ${escapeHtml(assigneeNames)}</p>` +
         series +
-        `<table>${rows}</table>`,
+        `<table>${rows}</table>` +
+        descriptionHtml,
     },
     transactionId: `ninjaone-ticket-${detail.id}-${window.day}`,
     singleValueExtendedProperties: [{ id: TICKET_PROP, value: `${detail.id}:${window.day}` }],
@@ -356,7 +408,10 @@ async function processTicket(row, ctx, result) {
   let created = 0;
   for (const w of check.days) {
     if (await findEvent(id, w.day)) continue;
-    await graph.post(`/users/${encodeURIComponent(MAILBOX)}/events`, buildEvent(detail, ctx, w, check, assigneeNames));
+    await graph.post(
+      `/users/${encodeURIComponent(MAILBOX)}/events`,
+      buildEvent(detail, ctx, w, check, assigneeNames, descriptionOf(rawLog))
+    );
     created++;
   }
   await postNote(id, ctx.checker.addedNote(check, created));
@@ -365,24 +420,22 @@ async function processTicket(row, ctx, result) {
   console.log(`[calendarSync] #${id} added to calendar (${created} new of ${check.days.length} event(s))`);
 }
 
-async function run() {
-  const error = configError();
-  if (error) return { ok: false, error };
-
+// The board, fields and technicians the sync works with -> { board, ctx } or { error }.
+async function loadContext() {
   const [boards, attributes, technicians] = await Promise.all([
     ninja.get('/v2/ticketing/trigger/boards'),
     ninja.get('/v2/ticketing/attributes'),
     ninja.get('/v2/user/technicians'),
   ]);
   const board = boards.find((b) => b.name === AV_BOARD);
-  if (!board) return { ok: false, error: `No NinjaOne board named "${AV_BOARD}" (check .env)` };
+  if (!board) return { error: `No NinjaOne board named "${AV_BOARD}" (check .env)` };
 
   const attrsByRole = {};
   for (const [role, name] of Object.entries(FIELD_NAMES)) {
     attrsByRole[role] = attributes.find((a) => a.name === name) || null;
   }
   for (const role of ['date', 'start', 'end', 'location']) {
-    if (!attrsByRole[role]) return { ok: false, error: `No ticket field named "${FIELD_NAMES[role]}" (check .env)` };
+    if (!attrsByRole[role]) return { error: `No ticket field named "${FIELD_NAMES[role]}" (check .env)` };
   }
   const ctx = {
     attrsById: new Map(attributes.map((a) => [a.id, a])),
@@ -394,6 +447,34 @@ async function run() {
       locationOptions: (attrsByRole.location.content.values || []).filter((o) => o.active !== false),
     }),
   };
+  return { board, ctx };
+}
+
+// The calendar event(s) a ticket would get, built from its current fields,
+// without writing anything (npm run sync-once -- --preview <id>).
+async function previewEvents(id) {
+  const { ctx, error } = await loadContext();
+  if (error) throw new Error(error);
+  const [detail, rawLog] = await Promise.all([
+    ninja.get(`/v2/ticketing/ticket/${id}`),
+    ninja.get(`/v2/ticketing/ticket/${id}/log-entry`),
+  ]);
+  const check = ctx.checker.validate(currentValues(detail, ctx));
+  if (!check.ok) return { ok: false, problems: check.problems };
+  const assigneeNames =
+    [detail.assignedAppUserId, ...(detail.additionalAssignedTechnicianIds || [])]
+      .filter(Boolean)
+      .map((tid) => ctx.technicianNames.get(tid) || `Technician #${tid}`)
+      .join(' + ') || 'Unassigned';
+  return { ok: true, events: check.days.map((w) => buildEvent(detail, ctx, w, check, assigneeNames, descriptionOf(rawLog))) };
+}
+
+async function run() {
+  const error = configError();
+  if (error) return { ok: false, error };
+  const loaded = await loadContext();
+  if (loaded.error) return { ok: false, error: loaded.error };
+  const { board, ctx } = loaded;
 
   const { rows } = await ninja.runBoard(board.id);
   const statusOf = (t) => t.status && t.status.displayName;
@@ -480,4 +561,5 @@ async function getStats() {
   return lastResult;
 }
 
-module.exports = { getStats, needsInfoIds, alertFor }; // alertFor: for npm run check-calendar
+// alertFor: for npm run check-calendar; previewEvents: for npm run sync-once.
+module.exports = { getStats, needsInfoIds, alertFor, previewEvents };
