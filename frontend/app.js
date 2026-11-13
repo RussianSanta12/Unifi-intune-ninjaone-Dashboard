@@ -137,12 +137,13 @@ function ticketLabel(ticket) {
   );
 }
 
-function renderTicketSide(side, sideData, statuses) {
+// autoScroll: LIST_PANEL_SCROLL in .env (yes/no).
+function renderTicketSide(side, sideData, statuses, autoScroll) {
   const ok = sideData && sideData.ok !== false;
   setText(`tickets-${side}-count`, ok ? `(${sideData.count})` : '');
   renderLegend(`tickets-${side}-legend`, statuses);
   renderIssueList(`tickets-${side}`, ok ? sideData.tickets : [], ticketLabel, {
-    autoScroll: true,
+    autoScroll,
     classFn: (ticket) => `status-${ticket.statusIndex}` + (ticket.unassigned ? ' unassigned' : ''),
   });
   setStatus(`tickets-${side}-status`, sideData);
@@ -430,7 +431,7 @@ function renderTickets(data) {
     renderTitles(data.labels);
   }
   // If the whole connector failed, show its error on every panel.
-  renderTicketSide('it', ok ? data.it : data, ok ? data.statuses : []);
+  renderTicketSide('it', ok ? data.it : data, ok ? data.statuses : [], !ok || data.listScroll !== false);
   renderWeek(ok ? data.av : data);
   renderAvCalendar(ok ? data.av : data);
 }

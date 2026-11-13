@@ -30,6 +30,9 @@ module.exports = {
   list: {
     title: setting(['LIST_PANEL_TITLE'], listBoard),
     board: listBoard,
+    // yes (default): a list longer than the panel scrolls on its own; no: it
+    // stays still.
+    scroll: !/^(no|n|false|off|0)$/i.test(setting(['LIST_PANEL_SCROLL'], 'yes')),
     fields: {
       location: setting(['LIST_PANEL_LOCATION_FIELD', 'NINJAONE_IT_LOCATION_FIELD'], 'Location(IT)'),
       // A DATE field shown as "Needed by …" under the location (Maintenance).

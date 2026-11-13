@@ -286,7 +286,7 @@ async function getStats() {
     loadBoard(boards, technicianNames, panels.list.board, { fieldNames: LIST_FIELDS, allAttributes: attributeList }),
     loadBoard(boards, technicianNames, panels.calendar.board, { av: true, fieldNames: CALENDAR_FIELDS, allAttributes: attributeList }),
   ]);
-  return { ok: true, statuses: STATUSES, labels: titles(), it, av };
+  return { ok: true, statuses: STATUSES, labels: titles(), listScroll: panels.list.scroll, it, av };
 }
 
 module.exports = { getStats };
