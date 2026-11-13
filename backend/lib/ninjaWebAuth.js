@@ -91,6 +91,11 @@ function getAccessToken() {
   return refreshing;
 }
 
+// After a 401: the next call refreshes (unless a parallel call already did).
+function forgetAccessToken(token) {
+  if (accessToken === token) accessToken = null;
+}
+
 async function refreshAccessToken() {
   // Another process (a script, or a second backend) may have refreshed and
   // rotated the token since we loaded it; the file always has the newest.
@@ -138,4 +143,4 @@ async function handleCallback({ code, state }) {
   }
 }
 
-module.exports = { isConfigured, isConnected, getAccessToken, authorizeUrl, handleCallback };
+module.exports = { isConfigured, isConnected, getAccessToken, forgetAccessToken, authorizeUrl, handleCallback };

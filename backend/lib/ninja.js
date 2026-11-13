@@ -76,7 +76,8 @@ async function fetchAccessToken() {
 
 // forgetToken: when given, a 401 drops the token and retries once — another
 // process (a script, a second dashboard) signing in with the same app
-// invalidates our token.
+// invalidates our token, and NinjaOne sometimes refuses a fresh one once
+// (calendar test, ticket #1144).
 function makeClient(getToken, forgetToken) {
   async function request(method, path, body, retried = false) {
     const token = await getToken();
@@ -154,5 +155,6 @@ module.exports = {
   get: read.get,
   post: read.post,
   runBoard,
-  write: makeClient(webAuth.getAccessToken),
+  // A 401 means the write wasn't done, so retrying it once is safe.
+  write: makeClient(webAuth.getAccessToken, webAuth.forgetAccessToken),
 };
