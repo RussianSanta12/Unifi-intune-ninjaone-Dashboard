@@ -3,7 +3,8 @@
 //   - Graph can open the events calendar (CALENDAR_MAILBOX) and edit it;
 //   - Graph is REFUSED for any other mailbox (the Exchange access policy);
 //   - the NinjaOne write sign-in works.
-// Pass other mailboxes to test as arguments:
+// The mailbox that must be refused is CALENDAR_CHECK_OTHER_MAILBOX in .env,
+// or pass mailboxes as arguments:
 //   npm run check-connections -- someone@example.org
 // Nothing is written. The NinjaOne check uses only the write sign-in, so it
 // doesn't log the running dashboard's read client out.
@@ -36,9 +37,12 @@ async function main() {
       report('FAIL', `open ${MAILBOX}`, err.message.slice(0, 200));
     }
 
-    // Some mailbox that isn't the events calendar: the signed-in admin's own
-    // is a good default, plus any given on the command line.
-    const targets = others.length ? others : [process.env.CALENDAR_CHECK_OTHER_MAILBOX || 'someone@example.org'];
+    // Some mailbox that isn't the events calendar (e.g. the admin's own),
+    // from .env or the command line.
+    const targets = others.length ? others : [process.env.CALENDAR_CHECK_OTHER_MAILBOX].filter(Boolean);
+    if (!targets.length) {
+      report('FAIL', 'restriction check', 'set CALENDAR_CHECK_OTHER_MAILBOX in .env (any mailbox but the events calendar)');
+    }
     for (const other of targets) {
       try {
         await graph.get(`/users/${encodeURIComponent(other)}/calendar?$select=name`);
